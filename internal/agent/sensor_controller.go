@@ -8,66 +8,188 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
-	"time"
 
+	"github.com/joshuar/go-hass-agent/internal/hass"
 	"github.com/joshuar/go-hass-agent/internal/hass/sensor"
+	"github.com/joshuar/go-hass-agent/internal/logging"
+	"github.com/joshuar/go-hass-agent/internal/preferences"
 )
 
-type HassClient interface {
-	ProcessSensor(ctx context.Context, details sensor.Details) error
-	SensorList() []string
-	GetSensor(id string) (sensor.Details, error)
-	HassVersion(ctx context.Context) string
-	Endpoint(url string, timeout time.Duration)
+type worker interface {
+	ID() string
+	Start(ctx context.Context) (<-chan sensor.Entity, error)
+	Sensors(ctx context.Context) ([]sensor.Entity, error)
+	Stop() error
+}
+
+type workerState struct {
+	worker
+	started bool
+}
+
+type sensorController struct {
+	workers map[string]*workerState
+	id      string
+}
+
+func (c *sensorController) ID() string {
+	return c.id
+}
+
+func (c *sensorController) ActiveWorkers() []string {
+	activeWorkers := make([]string, 0, len(c.workers))
+
+	for id, worker := range c.workers {
+		if worker.started {
+			activeWorkers = append(activeWorkers, id)
+		}
+	}
+
+	return activeWorkers
+}
+
+func (c *sensorController) InactiveWorkers() []string {
+	inactiveWorkers := make([]string, 0, len(c.workers))
+
+	for id, worker := range c.workers {
+		if !worker.started {
+			inactiveWorkers = append(inactiveWorkers, id)
+		}
+	}
+
+	return inactiveWorkers
+}
+
+func (c *sensorController) Start(ctx context.Context, name string) (<-chan sensor.Entity, error) {
+	worker, exists := c.workers[name]
+	if !exists {
+		return nil, ErrUnknownWorker
+	}
+
+	if worker.started {
+		return nil, ErrWorkerAlreadyStarted
+	}
+
+	workerCh, err := c.workers[name].Start(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("could not start worker: %w", err)
+	}
+
+	c.workers[name].started = true
+
+	return workerCh, nil
+}
+
+func (c *sensorController) Stop(name string) error {
+	// Check if the given worker ID exists.
+	worker, exists := c.workers[name]
+	if !exists {
+		return ErrUnknownWorker
+	}
+	// Stop the worker. Report any errors.
+	if err := worker.Stop(); err != nil {
+		return fmt.Errorf("error stopping worker: %w", err)
+	}
+
+	return nil
+}
+
+func (c *sensorController) States(ctx context.Context) []sensor.Entity {
+	var sensors []sensor.Entity
+
+	for _, workerID := range c.ActiveWorkers() {
+		worker, found := c.workers[workerID]
+		if !found {
+			logging.FromContext(ctx).
+				With(slog.String("controller", c.ID())).
+				Debug("Worker not found",
+					slog.String("worker", workerID))
+
+			continue
+		}
+
+		workerSensors, err := worker.Sensors(ctx)
+		if err != nil || len(workerSensors) == 0 {
+			logging.FromContext(ctx).
+				With(slog.String("controller", c.ID())).
+				Debug("Could not retrieve worker sensors",
+					slog.String("worker", worker.ID()),
+					slog.Any("error", err))
+
+			continue
+		}
+
+		sensors = append(sensors, workerSensors...)
+	}
+
+	return sensors
 }
 
 // runSensorWorkers will start all the sensor worker functions for all sensor
 // controllers passed in. It returns a single merged channel of sensor updates.
 //
 //nolint:gocognit
-func (agent *Agent) runSensorWorkers(ctx context.Context, controllers ...SensorController) {
-	var sensorCh []<-chan sensor.Details
+func runSensorWorkers(ctx context.Context, prefs *preferences.Preferences, controllers ...SensorController) {
+	var sensorCh []<-chan sensor.Entity
 
 	for _, controller := range controllers {
-		ch, err := controller.StartAll(ctx)
-		if err != nil {
-			agent.logger.Warn("Start controller had errors.", slog.Any("errors", err))
-		} else {
-			sensorCh = append(sensorCh, ch)
+		logging.FromContext(ctx).Debug("Running controller", slog.String("controller", controller.ID()))
+
+		for _, workerName := range controller.InactiveWorkers() {
+			logging.FromContext(ctx).Debug("Starting worker", slog.String("worker", workerName))
+
+			workerCh, err := controller.Start(ctx, workerName)
+			if err != nil {
+				logging.FromContext(ctx).
+					Warn("Could not start worker.",
+						slog.String("controller", controller.ID()),
+						slog.String("worker", workerName),
+						slog.Any("errors", err))
+			} else {
+				sensorCh = append(sensorCh, workerCh)
+			}
 		}
 	}
 
 	if len(sensorCh) == 0 {
-		agent.logger.Warn("No workers were started by any controllers.")
-
+		logging.FromContext(ctx).Warn("No workers were started by any controllers.")
 		return
 	}
 
-	agent.logger.Debug("Processing sensor updates.")
+	hassclient, err := hass.NewClient(ctx)
+	if err != nil {
+		logging.FromContext(ctx).Debug("Cannot create Home Assistant client.", slog.Any("error", err))
+		return
+	}
 
-	for {
-		select {
-		case <-ctx.Done():
-			agent.logger.Debug("Stopping all sensor controllers.")
+	hassclient.Endpoint(prefs.RestAPIURL(), hass.DefaultTimeout)
 
-			for _, controller := range controllers {
-				if err := controller.StopAll(); err != nil {
-					agent.logger.Warn("Stop controller had errors.", slog.Any("error", err))
+	go func() {
+		<-ctx.Done()
+		logging.FromContext(ctx).Debug("Stopping all sensor controllers.")
+
+		for _, controller := range controllers {
+			for _, workerName := range controller.ActiveWorkers() {
+				if err := controller.Stop(workerName); err != nil {
+					logging.FromContext(ctx).
+						Warn("Could not stop worker.",
+							slog.String("controller", controller.ID()),
+							slog.String("worker", workerName),
+							slog.Any("errors", err))
 				}
 			}
-
-			return
-		default:
-			for details := range mergeCh(ctx, sensorCh...) {
-				go func(details sensor.Details) {
-					if err := agent.hass.ProcessSensor(ctx, details); err != nil {
-						agent.logger.Error("Process sensor failed.", slog.Any("error", err))
-					}
-				}(details)
-			}
-
-			return
 		}
+	}()
+
+	logging.FromContext(ctx).Debug("Processing sensor updates.")
+
+	for details := range mergeCh(ctx, sensorCh...) {
+		go func(details sensor.Entity) {
+			if err := hassclient.ProcessSensor(ctx, details); err != nil {
+				logging.FromContext(ctx).Error("Process sensor failed.", slog.Any("error", err))
+			}
+		}(details)
 	}
 }

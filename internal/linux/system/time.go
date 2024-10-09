@@ -25,44 +25,52 @@ const (
 	uptimeInterval = 15 * time.Minute
 	uptimeJitter   = time.Minute
 
-	timeWorkerID = "time_sensors"
+	timeWorkerID = "time"
 )
 
 type timeWorker struct {
-	logger       *slog.Logger
 	boottime     time.Time
+	logger       *slog.Logger
 	boottimeSent bool
 }
 
-func (w *timeWorker) Interval() time.Duration { return uptimeInterval }
+func (w *timeWorker) UpdateDelta(_ time.Duration) {}
 
-func (w *timeWorker) Jitter() time.Duration { return uptimeJitter }
-
-func (w *timeWorker) Sensors(_ context.Context, _ time.Duration) ([]sensor.Details, error) {
-	var sensors []sensor.Details
+func (w *timeWorker) Sensors(_ context.Context) ([]sensor.Entity, error) {
+	var sensors []sensor.Entity
 
 	// Send the uptime.
-	sensors = append(sensors, &linux.Sensor{
-		DisplayName:      "Uptime",
-		UniqueID:         "uptime",
-		Value:            w.getUptime() / 60 / 60, //nolint:mnd
-		IsDiagnostic:     true,
-		UnitsString:      "h",
-		IconString:       "mdi:restart",
-		DeviceClassValue: types.DeviceClassDuration,
-		StateClassValue:  types.StateClassMeasurement,
-	})
+	sensors = append(sensors,
+		sensor.Entity{
+			Name:        "Uptime",
+			Category:    types.CategoryDiagnostic,
+			Units:       "h",
+			DeviceClass: types.SensorDeviceClassDuration,
+			StateClass:  types.StateClassMeasurement,
+			State: &sensor.State{
+				ID:    "uptime",
+				Value: w.getUptime() / 60 / 60, //nolint:mnd
+				Icon:  "mdi:restart",
+				Attributes: map[string]any{
+					"data_source":                linux.DataSrcProcfs,
+					"native_unit_of_measurement": "h",
+				},
+			},
+		})
 
 	// Send the boottime if we haven't already.
 	if !w.boottimeSent {
-		sensors = append(sensors, &linux.Sensor{
-			DisplayName:      "Last Reboot",
-			UniqueID:         "last_reboot",
-			Value:            w.boottime.Format(time.RFC3339),
-			IsDiagnostic:     true,
-			IconString:       "mdi:restart",
-			DeviceClassValue: types.DeviceClassTimestamp,
-		})
+		sensors = append(sensors,
+			sensor.Entity{
+				Name:        "Last Reboot",
+				Category:    types.CategoryDiagnostic,
+				DeviceClass: types.SensorDeviceClassTimestamp,
+				State: &sensor.State{
+					ID:    "last_reboot",
+					Value: w.boottime.Format(time.RFC3339),
+					Icon:  "mdi:restart",
+				},
+			})
 		w.boottimeSent = true
 	}
 
@@ -100,18 +108,18 @@ func (w *timeWorker) getUptime() float64 {
 	return uptimeValue
 }
 
-func NewTimeWorker(ctx context.Context) (*linux.SensorWorker, error) {
+func NewTimeWorker(ctx context.Context) (*linux.PollingSensorWorker, error) {
+	worker := linux.NewPollingWorker(timeWorkerID, uptimeInterval, uptimeJitter)
+
 	boottime, found := linux.CtxGetBoottime(ctx)
 	if !found {
-		return nil, fmt.Errorf("%w: no boottime value", linux.ErrInvalidCtx)
+		return worker, fmt.Errorf("%w: no boottime value", linux.ErrInvalidCtx)
 	}
 
-	return &linux.SensorWorker{
-			Value: &timeWorker{
-				logger:   logging.FromContext(ctx).WithGroup(timeWorkerID),
-				boottime: boottime,
-			},
-			WorkerID: timeWorkerID,
-		},
-		nil
+	worker.PollingType = &timeWorker{
+		boottime: boottime,
+		logger:   logging.FromContext(ctx).With(slog.String("worker", timeWorkerID)),
+	}
+
+	return worker, nil
 }

@@ -3,62 +3,41 @@
 // This software is released under the MIT License.
 // https://opensource.org/licenses/MIT
 
-//go:generate stringer -type=ioSensor -output ioSensors_generated.go -linecomment
+//go:generate go run golang.org/x/tools/cmd/stringer -type=ioSensor -output ioSensors_generated.go -linecomment
 package disk
 
 import (
+	"strings"
 	"time"
 	"unicode"
 
-	"github.com/iancoleman/strcase"
-
+	"github.com/joshuar/go-hass-agent/internal/hass/sensor"
 	"github.com/joshuar/go-hass-agent/internal/hass/sensor/types"
 	"github.com/joshuar/go-hass-agent/internal/linux"
 )
 
 const (
-	diskReads     ioSensor = iota // Disk Reads
-	diskWrites                    // Disk Writes
-	diskReadRate                  // Disk Read Rate
-	diskWriteRate                 // Disk Write Rate
+	diskReads        ioSensor = iota // Disk Reads
+	diskWrites                       // Disk Writes
+	diskReadRate                     // Disk Read Rate
+	diskWriteRate                    // Disk Write Rate
+	diskIOInProgress                 // Disk IOs In Progress
 
 	diskRateUnits  = "kB/s"
 	diskCountUnits = "requests"
+	diskIOsUnits   = "ops"
+
+	ioReadsIcon  = "mdi:file-upload"
+	ioWritesIcon = "mdi:file-download"
+	ioOpsIcon    = "mdi:content-save"
 )
 
 type ioSensor int
 
 type diskIOSensor struct {
-	device     *device
-	attributes map[string]any
-	linux.Sensor
+	*sensor.Entity
 	sensorType ioSensor
 	prevValue  uint64
-}
-
-func (s *diskIOSensor) Name() string {
-	r := []rune(s.device.id)
-
-	return string(append([]rune{unicode.ToUpper(r[0])}, r[1:]...)) + " " + s.sensorType.String()
-}
-
-func (s *diskIOSensor) ID() string {
-	return s.device.id + "_" + strcase.ToSnake(s.sensorType.String())
-}
-
-func (s *diskIOSensor) Attributes() map[string]any {
-	return s.attributes
-}
-
-func (s *diskIOSensor) Icon() string {
-	switch s.sensorType {
-	case diskReads, diskReadRate:
-		return "mdi:file-upload"
-	case diskWrites, diskWriteRate:
-		return "mdi:file-download"
-	}
-
-	return "mdi:file"
 }
 
 //nolint:mnd
@@ -70,6 +49,8 @@ func (s *diskIOSensor) update(stats map[stat]uint64, delta time.Duration) {
 		s.Value = stats[TotalReads]
 	case diskWrites:
 		s.Value = stats[TotalWrites]
+	case diskIOInProgress:
+		s.Value = stats[ActiveIOs]
 	case diskReadRate:
 		curr = stats[TotalSectorsRead]
 	case diskWriteRate:
@@ -96,71 +77,75 @@ func (s *diskIOSensor) update(stats map[stat]uint64, delta time.Duration) {
 func (s *diskIOSensor) updateAttributes(stats map[stat]uint64) {
 	switch s.sensorType {
 	case diskReads:
-		s.attributes["total_sectors"] = stats[TotalSectorsRead]
-		s.attributes["total_milliseconds"] = stats[TotalTimeReading]
+		s.Attributes["total_sectors"] = stats[TotalSectorsRead]
+		s.Attributes["total_milliseconds"] = stats[TotalTimeReading]
 	case diskWrites:
-		s.attributes["total_sectors"] = stats[TotalSectorsWritten]
-		s.attributes["total_milliseconds"] = stats[TotalTimeWriting]
+		s.Attributes["total_sectors"] = stats[TotalSectorsWritten]
+		s.Attributes["total_milliseconds"] = stats[TotalTimeWriting]
 	}
 }
 
-func newDiskIOSensor(boottime time.Time, device *device, sensorType ioSensor) *diskIOSensor {
-	newSensor := &diskIOSensor{
-		device:     device,
-		sensorType: sensorType,
-		attributes: make(map[string]any),
-		Sensor: linux.Sensor{
-			StateClassValue: types.StateClassTotalIncreasing,
-			UnitsString:     diskCountUnits,
-			LastReset:       boottime.Format(time.RFC3339),
+func newDiskIOSensor(device *device, sensorType ioSensor, boottime time.Time) *diskIOSensor {
+	r := []rune(device.id)
+	name := string(append([]rune{unicode.ToUpper(r[0])}, r[1:]...)) + " " + sensorType.String()
+	id := strings.ToLower(device.id + "_" + strings.ReplaceAll(sensorType.String(), " ", "_"))
+
+	// Base diskIOSensor fields.
+	ioSensor := &diskIOSensor{
+		Entity: &sensor.Entity{
+			Name: name,
+			State: &sensor.State{
+				ID: id,
+				Attributes: map[string]any{
+					"data_source": linux.DataSrcSysfs,
+				},
+			},
 		},
+		sensorType: sensorType,
 	}
 
-	newSensor.attributes["data_source"] = linux.DataSrcSysfs
-	newSensor.attributes["native_unit_of_measurement"] = diskCountUnits
-	newSensor.attributes["last_reset"] = newSensor.LastReset
-
+	// Add attributes from device if available.
 	if device.model != "" {
-		newSensor.attributes["device_model"] = device.model
+		ioSensor.Attributes["device_model"] = device.model
 	}
 
 	if device.sysFSPath != "" {
-		newSensor.attributes["sysfs_path"] = device.sysFSPath
+		ioSensor.Attributes["sysfs_path"] = device.sysFSPath
 	}
 
 	if device.id != "total" {
-		newSensor.IsDiagnostic = true
+		ioSensor.Category = types.CategoryDiagnostic
 	}
 
-	return newSensor
-}
+	// Fill out additional fields based on sensor type.
+	switch sensorType {
+	case diskIOInProgress:
+		ioSensor.Icon = ioOpsIcon
+		ioSensor.StateClass = types.StateClassMeasurement
+		ioSensor.Units = diskIOsUnits
+	case diskReads, diskWrites:
+		if sensorType == diskReads {
+			ioSensor.Icon = ioReadsIcon
+		} else {
+			ioSensor.Icon = ioWritesIcon
+		}
 
-func newDiskIORateSensor(device *device, sensorType ioSensor) *diskIOSensor {
-	newSensor := &diskIOSensor{
-		device:     device,
-		sensorType: sensorType,
-		Sensor: linux.Sensor{
-			DeviceClassValue: types.DeviceClassDataRate,
-			StateClassValue:  types.StateClassMeasurement,
-			UnitsString:      diskRateUnits,
-		},
-		attributes: make(map[string]any),
+		ioSensor.Units = diskCountUnits
+		ioSensor.Attributes["native_unit_of_measurement"] = diskCountUnits
+		ioSensor.StateClass = types.StateClassTotalIncreasing
+		ioSensor.Attributes["last_reset"] = boottime.Format(time.RFC3339)
+	case diskReadRate, diskWriteRate:
+		if sensorType == diskReadRate {
+			ioSensor.Icon = ioReadsIcon
+		} else {
+			ioSensor.Icon = ioWritesIcon
+		}
+
+		ioSensor.Units = diskRateUnits
+		ioSensor.Attributes["native_unit_of_measurement"] = diskRateUnits
+		ioSensor.DeviceClass = types.SensorDeviceClassDataRate
+		ioSensor.StateClass = types.StateClassMeasurement
 	}
 
-	newSensor.attributes["data_source"] = linux.DataSrcSysfs
-	newSensor.attributes["native_unit_of_measurement"] = diskRateUnits
-
-	if device.model != "" {
-		newSensor.attributes["device_model"] = device.model
-	}
-
-	if device.sysFSPath != "" {
-		newSensor.attributes["sysfs_path"] = device.sysFSPath
-	}
-
-	if device.id != "total" {
-		newSensor.IsDiagnostic = true
-	}
-
-	return newSensor
+	return ioSensor
 }

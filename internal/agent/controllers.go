@@ -12,37 +12,23 @@ import (
 	mqttapi "github.com/joshuar/go-hass-anything/v11/pkg/mqtt"
 
 	"github.com/joshuar/go-hass-agent/internal/hass/sensor"
+	"github.com/joshuar/go-hass-agent/internal/preferences"
 )
 
 // SensorController represents an object that manages one or more Workers.
 type SensorController interface {
+	ID() string
+	// States returns the list of all sensor states tracked by all workers of
+	// this controller.
+	States(ctx context.Context) []sensor.Entity
 	// ActiveWorkers is a list of the names of all currently active Workers.
 	ActiveWorkers() []string
 	// InactiveWorkers is a list of the names of all currently inactive Workers.
 	InactiveWorkers() []string
 	// Start provides a way to start the named Worker.
-	Start(ctx context.Context, name string) (<-chan sensor.Details, error)
+	Start(ctx context.Context, name string) (<-chan sensor.Entity, error)
 	// Stop provides a way to stop the named Worker.
 	Stop(name string) error
-	// StartAll will start all Workers that this controller manages.
-	StartAll(ctx context.Context) (<-chan sensor.Details, error)
-	// StopAll will stop all Workers that this controller manages.
-	StopAll() error
-}
-
-// Worker represents an object that is responsible for controlling the
-// publishing of one or more sensors.
-type Worker interface {
-	ID() string
-	// Sensors returns an array of the current value of all sensors, or a
-	// non-nil error if this is not possible.
-	Sensors(ctx context.Context) ([]sensor.Details, error)
-	// Updates returns a channel on which updates to sensors will be published,
-	// when they become available.
-	Updates(ctx context.Context) (<-chan sensor.Details, error)
-	// Stop is used to tell the worker to stop any background updates of
-	// sensors.
-	Stop() error
 }
 
 // MQTTController represents an object that is responsible for controlling the
@@ -59,7 +45,7 @@ type MQTTController interface {
 	Msgs() chan *mqttapi.Msg
 }
 
-func (agent *Agent) setupControllers(ctx context.Context) []any {
+func (agent *Agent) setupControllers(ctx context.Context, prefs *preferences.Preferences) []any {
 	var (
 		mqttDevice  *mqtthass.Device
 		controllers []any
@@ -67,33 +53,31 @@ func (agent *Agent) setupControllers(ctx context.Context) []any {
 
 	// If MQTT functionality is enabled create an MQTT device, used to configure
 	// MQTT functionality for some controllers.
-	prefs := agent.GetMQTTPreferences()
-	if prefs != nil && prefs.IsMQTTEnabled() {
-		mqttDevice = agent.newMQTTDevice()
+	if prefs.IsMQTTEnabled() {
+		mqttDevice = prefs.GenerateMQTTDevice(ctx)
 		// Create an MQTT commands controller.
-		mqttCmdController := agent.newMQTTController(ctx, mqttDevice)
+		mqttCmdController := newMQTTController(ctx, mqttDevice)
 		if mqttCmdController != nil {
 			controllers = append(controllers, mqttCmdController)
 		}
+		// Add the OS MQTT controller.
+		controllers = append(controllers, newOSMQTTController(ctx, mqttDevice))
 	}
 
-	scriptsController := agent.newScriptsController(ctx)
+	scriptsController := newScriptsController(ctx)
 	if scriptsController != nil {
 		controllers = append(controllers, scriptsController)
 	}
 
 	// Create a new device controller. The controller will have all the
-	// necessary configuration for device-specific sensors and MQTT
-	// configuration.
-	devController := agent.newDeviceController(ctx)
+	// necessary configuration for device-specific sensors.
+	devController := agent.newDeviceController(ctx, prefs)
 	if devController != nil {
 		controllers = append(controllers, devController)
 	}
-	// Create a new OS controller. The controller will have all the
-	// necessary configuration for any OS-specific sensors and MQTT
-	// configuration.
-	osSensorController, osMQTTController := agent.newOSController(ctx, mqttDevice)
-	controllers = append(controllers, osSensorController, osMQTTController)
+	// Create a new OS controller. The controller will have all the necessary
+	// configuration for any OS-specific sensors.
+	controllers = append(controllers, newOSSensorController(ctx))
 
 	return controllers
 }

@@ -40,6 +40,30 @@ type Controller struct {
 	jobs      []job
 }
 
+func (c *Controller) ID() string {
+	return "scripts"
+}
+
+func (c *Controller) States(_ context.Context) []sensor.Entity {
+	var sensors []sensor.Entity
+
+	for _, worker := range c.ActiveWorkers() {
+		found := slices.IndexFunc(c.jobs, func(j job) bool { return j.path == worker })
+
+		jobSensors, err := c.jobs[found].Execute()
+		if err != nil {
+			c.logger.Warn("Could not retrieve script sensors",
+				slog.String("script", c.jobs[found].path),
+				slog.Any("error", err),
+			)
+		} else {
+			sensors = append(sensors, jobSensors...)
+		}
+	}
+
+	return sensors
+}
+
 func (c *Controller) ActiveWorkers() []string {
 	var activeScripts []string
 
@@ -64,7 +88,7 @@ func (c *Controller) InactiveWorkers() []string {
 	return inactiveScripts
 }
 
-func (c *Controller) Start(_ context.Context, name string) (<-chan sensor.Details, error) {
+func (c *Controller) Start(_ context.Context, name string) (<-chan sensor.Entity, error) {
 	found := slices.IndexFunc(c.jobs, func(j job) bool { return j.path == name })
 
 	// If the script was not found, return an error.
@@ -76,7 +100,7 @@ func (c *Controller) Start(_ context.Context, name string) (<-chan sensor.Detail
 		return nil, ErrAlreadyStarted
 	}
 
-	sensorCh := make(chan sensor.Details)
+	sensorCh := make(chan sensor.Entity)
 
 	// Schedule the script.
 	id, err := c.scheduler.AddFunc(c.jobs[found].Schedule(), func() {
@@ -121,75 +145,6 @@ func (c *Controller) Stop(name string) error {
 	c.scheduler.Remove(c.jobs[found].ID)
 
 	c.jobs[found].ID = 0
-
-	return nil
-}
-
-func (c *Controller) StartAll(_ context.Context) (<-chan sensor.Details, error) {
-	sensorCh := make(chan sensor.Details)
-
-	// If there are no jobs, exit.
-	if len(c.jobs) == 0 {
-		close(sensorCh)
-
-		return sensorCh, nil
-	}
-
-	for idx, job := range c.jobs {
-		if job.ID > 0 {
-			c.logger.Warn("Script already started.", job.logAttrs)
-
-			continue
-		}
-
-		// Create a closure to run the script on it's schedule.
-		runFunc := func() {
-			sensors, err := job.Script.Execute()
-			if err != nil {
-				c.logger.Warn("Could not execute script.",
-					job.logAttrs,
-					slog.Any("error", err))
-
-				return
-			}
-
-			for _, o := range sensors {
-				sensorCh <- o
-			}
-		}
-		// Add the script to the cron scheduler to run the closure on it's
-		// defined schedule.
-		id, err := c.scheduler.AddFunc(job.schedule, runFunc)
-		if err != nil {
-			c.logger.Warn("Unable to schedule script",
-				job.logAttrs,
-				slog.Any("error", err))
-		} else {
-			c.jobs[idx].ID = id
-			c.logger.Debug("Added cron job.",
-				job.logAttrs,
-				slog.Any("job_id", id))
-		}
-	}
-
-	c.logger.Debug("Starting cron scheduler.")
-	c.scheduler.Start()
-
-	return sensorCh, nil
-}
-
-func (c *Controller) StopAll() error {
-	for idx, job := range c.jobs {
-		c.logger.Debug("Removing cron job.", job.logAttrs)
-		c.scheduler.Remove(job.ID)
-		c.jobs[idx].ID = 0
-	}
-
-	c.logger.Debug("Stopping cron scheduler.")
-	waitCtx := c.scheduler.Stop()
-	<-waitCtx.Done()
-
-	c.logger.Debug("Exiting script controller.")
 
 	return nil
 }

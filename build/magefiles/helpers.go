@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"os/exec"
+	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
@@ -48,23 +48,6 @@ func sudoWrap(cmd string, args ...string) error {
 	} else {
 		if err := sh.RunV("sudo", slices.Concat([]string{cmd}, args)...); err != nil {
 			return fmt.Errorf("could not run command: %w", err)
-		}
-	}
-
-	return nil
-}
-
-// foundOrInstalled checks for existence then installs a file if it's not there.
-func foundOrInstalled(executableName, installURL string) error {
-	_, missing := exec.LookPath(executableName)
-	if missing != nil {
-		slog.Info("Installing tool.",
-			slog.String("tool", executableName),
-			slog.String("url", installURL))
-
-		err := sh.Run("go", "install", installURL)
-		if err != nil {
-			return fmt.Errorf("installation failed: %w", err)
 		}
 	}
 
@@ -118,7 +101,7 @@ func getVersion() (string, error) {
 	return version, nil
 }
 
-// hash returns the git hash for the current repo or "" if none.
+// getGitHash returns the git hash for the current repo or "" if none.
 func getGitHash() (string, error) {
 	hash, err := sh.Output("git", "rev-parse", "--short", "HEAD")
 	if err != nil {
@@ -138,10 +121,10 @@ func getBuildDate() (string, error) {
 	return date, nil
 }
 
-// generateEnv will create a map[string]string containing environment variables
-// and their values necessary for building the package on the given
+// generateBuildEnv will create a map[string]string containing environment
+// variables and their values necessary for building Go Hass Agent on the given
 // architecture.
-func generateEnv() (map[string]string, error) {
+func generateBuildEnv() (map[string]string, error) {
 	envMap := make(map[string]string)
 
 	// CGO_ENABLED is required.
@@ -154,21 +137,12 @@ func generateEnv() (map[string]string, error) {
 	// Set APPVERSION to current version.
 	envMap["APPVERSION"] = version
 
-	// Set NFPM_ARCH so that nfpm knows how to package for this arch.
-	envMap["NFPM_ARCH"] = runtime.GOARCH
-
 	// Get the value of BUILDPLATFORM (if set) from the environment, which
 	// indicates cross-compilation has been requested.
 	_, arch, ver := parseBuildPlatform()
 
 	if arch != "" && arch != runtime.GOARCH {
-		slog.Info("Cross compilation requested.",
-			slog.String("host", runtime.GOARCH),
-			slog.String("target", arch))
-
-		// Update NFPM_ARCH to the target arch.
-		envMap["NFPM_ARCH"] = arch + ver
-
+		slog.Info("Setting up cross-compilation.")
 		// Set additional build-related variables based on the target arch.
 		switch arch {
 		case "arm":
@@ -190,14 +164,41 @@ func generateEnv() (map[string]string, error) {
 		envMap["PLATFORMPAIR"] = runtime.GOARCH
 	}
 
+	// Set an appropriate output file based on the arch to build for.
+	envMap["OUTPUT"] = filepath.Join(distPath, "/go-hass-agent-"+envMap["PLATFORMPAIR"])
+
+	return envMap, nil
+}
+
+// generatePkgEnv will create a map[string]string containing environment
+// variables and their values necessary for packaging Go Hass Agent on the given
+// architecture.
+func generatePkgEnv() (map[string]string, error) {
+	envMap := make(map[string]string)
+
+	version, err := getVersion()
+	if err != nil {
+		return nil, fmt.Errorf("could not generate env: %w", err)
+	}
+	// Set APPVERSION to current version.
+	envMap["APPVERSION"] = version
+	// Set NFPM_ARCH so that nfpm knows how to package for this arch.
+	envMap["NFPM_ARCH"] = runtime.GOARCH
+	// Parse the build platform from the environment.
+	_, arch, ver := parseBuildPlatform()
+	// For arm, set the NFPM_ARCH to include the revision.
+	if arch != "" && arch != runtime.GOARCH {
+		slog.Info("Setting up cross-compilation.")
+		// Update NFPM_ARCH to the target arch.
+		envMap["NFPM_ARCH"] = arch + ver
+	}
+
 	return envMap, nil
 }
 
 // parseBuildPlatform reads the TARGETPLATFORM environment variable, which should
 // always be set, and extracts the value into appropriate GOOS, GOARCH and GOARM
 // (if applicable) variables.
-//
-//nolint:mnd
 func parseBuildPlatform() (operatingsystem, architecture, version string) {
 	var buildPlatform string
 
@@ -209,11 +210,26 @@ func parseBuildPlatform() (operatingsystem, architecture, version string) {
 
 	buildComponents := strings.Split(buildPlatform, "/")
 	operatingsystem = buildComponents[0]
-	architecture = buildComponents[1]
+
+	if len(buildComponents) > 1 {
+		architecture = buildComponents[1]
+	}
 
 	if len(buildComponents) > 2 {
 		version = strings.TrimPrefix(buildComponents[2], "v")
 	}
 
 	return operatingsystem, architecture, version
+}
+
+func cleanDir(path string) error {
+	if err := os.RemoveAll(path); err != nil {
+		return fmt.Errorf("could not clean directory %s: %w", path, err)
+	}
+
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		return fmt.Errorf("could not create directory %s: %w", path, err)
+	}
+
+	return nil
 }

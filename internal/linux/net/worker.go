@@ -10,13 +10,13 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"slices"
 	"sync"
 
 	"github.com/godbus/dbus/v5"
 
 	"github.com/joshuar/go-hass-agent/internal/hass/sensor"
 	"github.com/joshuar/go-hass-agent/internal/linux"
+	"github.com/joshuar/go-hass-agent/internal/logging"
 	"github.com/joshuar/go-hass-agent/pkg/linux/dbusx"
 )
 
@@ -35,42 +35,45 @@ const (
 	netConnWorkerID = "network_connection_sensors"
 )
 
-type connectionsWorker struct {
+type ConnectionsWorker struct {
 	bus    *dbusx.Bus
+	list   map[string]*connection
 	logger *slog.Logger
-	list   []dbus.ObjectPath
-	mu     sync.Mutex
+	linux.EventSensorWorker
+	mu sync.Mutex
 }
 
-func (w *connectionsWorker) track(path dbus.ObjectPath) {
+func (w *ConnectionsWorker) track(conn *connection) {
 	w.mu.Lock()
-	w.list = append(w.list, path)
+	w.list[conn.name] = conn
 	w.mu.Unlock()
 }
 
-func (w *connectionsWorker) untrack(path dbus.ObjectPath) {
+func (w *ConnectionsWorker) untrack(id string) {
 	w.mu.Lock()
-	w.list = slices.DeleteFunc(w.list, func(p dbus.ObjectPath) bool {
-		return path == p
-	})
+	delete(w.list, id)
 	w.mu.Unlock()
 }
 
-func (w *connectionsWorker) isTracked(path dbus.ObjectPath) bool {
+func (w *ConnectionsWorker) isTracked(id string) bool {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	return slices.Contains(w.list, path)
+	if _, found := w.list[id]; found {
+		return true
+	}
+
+	return false
 }
 
-func (w *connectionsWorker) Sensors(_ context.Context) ([]sensor.Details, error) {
+func (w *ConnectionsWorker) Sensors(_ context.Context) ([]sensor.Entity, error) {
 	return nil, linux.ErrUnimplemented
 }
 
 //nolint:mnd
 //revive:disable:function-length
-func (w *connectionsWorker) Events(ctx context.Context) (chan sensor.Details, error) {
-	sensorCh := make(chan sensor.Details)
+func (w *ConnectionsWorker) Events(ctx context.Context) (<-chan sensor.Entity, error) {
+	sensorCh := make(chan sensor.Entity)
 	connCtx, connCancel := context.WithCancel(ctx)
 
 	triggerCh, err := dbusx.NewWatch(
@@ -128,13 +131,13 @@ func (w *connectionsWorker) Events(ctx context.Context) (chan sensor.Details, er
 	return sensorCh, nil
 }
 
-func (w *connectionsWorker) handleConnection(ctx context.Context, path dbus.ObjectPath, sensorCh chan sensor.Details) error {
+func (w *ConnectionsWorker) handleConnection(ctx context.Context, path dbus.ObjectPath, sensorCh chan sensor.Entity) error {
 	conn, err := newConnection(w.bus, path)
 	if err != nil {
 		return fmt.Errorf("could not create connection: %w", err)
 	}
 	// Ignore loopback or already tracked connections.
-	if conn.name == "lo" || w.isTracked(path) {
+	if conn.name == "lo" || w.isTracked(conn.name) {
 		slog.Debug("Ignoring connection.", slog.String("connection", conn.name))
 
 		return nil
@@ -143,30 +146,32 @@ func (w *connectionsWorker) handleConnection(ctx context.Context, path dbus.Obje
 	// Start monitoring the connection. Pass any sensor updates from the
 	// connection through the sensor channel.
 	go func() {
-		w.track(path)
+		w.track(conn)
 
 		for s := range conn.monitor(ctx, w.bus) {
 			sensorCh <- s
 		}
 
-		w.untrack(path)
+		w.untrack(conn.name)
 	}()
 
 	return nil
 }
 
-func NewConnectionWorker(ctx context.Context) (*linux.SensorWorker, error) {
+func NewConnectionWorker(ctx context.Context) (*linux.EventSensorWorker, error) {
+	worker := linux.NewEventWorker(netConnWorkerID)
+
 	bus, ok := linux.CtxGetSystemBus(ctx)
 	if !ok {
-		return nil, linux.ErrNoSystemBus
+		return worker, linux.ErrNoSystemBus
 	}
 
-	return &linux.SensorWorker{
-			Value: &connectionsWorker{
-				bus:    bus,
-				logger: slog.With(slog.String("worker", netConnWorkerID)),
-			},
-			WorkerID: netConnWorkerID,
-		},
-		nil
+	worker.EventType = &ConnectionsWorker{
+		bus:  bus,
+		list: make(map[string]*connection),
+		logger: logging.FromContext(ctx).
+			With(slog.String("worker", netConnWorkerID)),
+	}
+
+	return worker, nil
 }

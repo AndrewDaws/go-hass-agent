@@ -3,7 +3,7 @@
 // This software is released under the MIT License.
 // https://opensource.org/licenses/MIT
 
-//go:generate stringer -type=connState,connIcon -output connectionState_generated.go -linecomment
+//go:generate go run golang.org/x/tools/cmd/stringer -type=connState,connIcon -output connectionState_generated.go -linecomment
 package net
 
 import (
@@ -12,6 +12,7 @@ import (
 	"github.com/godbus/dbus/v5"
 	"github.com/iancoleman/strcase"
 
+	"github.com/joshuar/go-hass-agent/internal/hass/sensor"
 	"github.com/joshuar/go-hass-agent/internal/linux"
 	"github.com/joshuar/go-hass-agent/pkg/linux/dbusx"
 )
@@ -38,16 +39,7 @@ type connIcon uint32
 
 type connectionStateSensor struct {
 	stateProp *dbusx.Property[connState]
-	linux.Sensor
-	value connState
-}
-
-func (c *connectionStateSensor) Icon() string {
-	return connIcon(c.value).String()
-}
-
-func (c *connectionStateSensor) State() any {
-	return c.value.String()
+	*sensor.Entity
 }
 
 func (c *connectionStateSensor) setState(state any) error {
@@ -56,10 +48,12 @@ func (c *connectionStateSensor) setState(state any) error {
 		if state, err := dbusx.VariantToValue[connState](value); err != nil {
 			return fmt.Errorf("could not parse updated connection state: %w", err)
 		} else {
-			c.value = state
+			c.Entity.Value = state.String()
+			c.Entity.Icon = connIcon(state).String()
 		}
 	case uint32:
-		c.value = connState(value)
+		c.Entity.Value = connState(value).String()
+		c.Entity.Icon = connIcon(value).String()
 	default:
 		return ErrUnsupportedValue
 	}
@@ -73,17 +67,22 @@ func (c *connectionStateSensor) updateState() error {
 		return fmt.Errorf("cannot update state: %w", err)
 	}
 
-	c.value = state
+	c.Entity.Value = state.String()
+	c.Entity.Icon = connIcon(state).String()
 
 	return nil
 }
 
 func newConnectionStateSensor(bus *dbusx.Bus, connectionPath, connectionName string) *connectionStateSensor {
 	return &connectionStateSensor{
-		Sensor: linux.Sensor{
-			DataSource:  linux.DataSrcDbus,
-			DisplayName: connectionName + " Connection State",
-			UniqueID:    strcase.ToSnake(connectionName) + "_connection_state",
+		Entity: &sensor.Entity{
+			Name: connectionName + " Connection State",
+			State: &sensor.State{
+				ID: strcase.ToSnake(connectionName) + "_connection_state",
+				Attributes: map[string]any{
+					"data_source": linux.DataSrcDbus,
+				},
+			},
 		},
 		stateProp: dbusx.NewProperty[connState](bus, connectionPath, dBusNMObj, connectionStateProp),
 	}

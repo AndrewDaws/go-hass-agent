@@ -7,13 +7,9 @@
 package cli
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"log/slog"
-	"path/filepath"
-
-	"github.com/adrg/xdg"
 
 	"github.com/joshuar/go-hass-agent/internal/agent"
 	"github.com/joshuar/go-hass-agent/internal/hass/sensor/registry"
@@ -27,43 +23,29 @@ func (r *ResetCmd) Help() string {
 	return showHelpTxt("reset-help")
 }
 
-func (r *ResetCmd) Run(ctx *Context) error {
-	agentCtx, cancelFunc := context.WithCancel(context.Background())
+func (r *ResetCmd) Run(opts *CmdOpts) error {
+	agentCtx, cancelFunc := newContext(opts)
 	defer cancelFunc()
-
-	var logFile string
-
-	if ctx.NoLogFile {
-		logFile = ""
-	} else {
-		logFile = filepath.Join(xdg.ConfigHome, ctx.AppID, "agent.log")
-	}
-
-	logger := logging.New(ctx.LogLevel, logFile)
-	agentCtx = logging.ToContext(agentCtx, logger)
 
 	var errs error
 
-	gohassagent, err := agent.NewAgent(agentCtx, ctx.AppID,
-		agent.Headless(ctx.Headless))
-	if err != nil {
-		errs = errors.Join(errs, fmt.Errorf("failed to run reset command: %w", err))
-	}
+	agentCtx = agent.LoadCtx(agentCtx,
+		agent.SetHeadless(opts.Headless))
 
 	// Reset agent.
-	if err := gohassagent.Reset(agentCtx); err != nil {
+	if err := agent.Reset(agentCtx); err != nil {
 		errs = errors.Join(fmt.Errorf("agent reset failed: %w", err))
 	}
 	// Reset registry.
-	if err := registry.Reset(gohassagent.GetRegistryPath()); err != nil {
+	if err := registry.Reset(agentCtx); err != nil {
 		errs = errors.Join(fmt.Errorf("registry reset failed: %w", err))
 	}
 	// Reset preferences.
-	if err := preferences.Reset(gohassagent.GetPreferencesPath()); err != nil {
+	if err := preferences.Reset(agentCtx); err != nil {
 		errs = errors.Join(fmt.Errorf("preferences reset failed: %w", err))
 	}
 	// Reset the log.
-	if err := logging.Reset(logFile); err != nil {
+	if err := logging.Reset(agentCtx); err != nil {
 		errs = errors.Join(fmt.Errorf("logging reset failed: %w", err))
 	}
 

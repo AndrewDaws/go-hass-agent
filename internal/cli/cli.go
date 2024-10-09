@@ -6,13 +6,14 @@
 package cli
 
 import (
+	"context"
 	"embed"
-	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
 
 	"github.com/joshuar/go-hass-agent/internal/logging"
+	"github.com/joshuar/go-hass-agent/internal/preferences"
 )
 
 const (
@@ -23,18 +24,16 @@ const (
 //go:embed assets
 var content embed.FS
 
-type Context struct {
-	Profile   ProfileFlags
-	AppID     string
-	LogLevel  string
-	Headless  bool
-	NoLogFile bool
+type CmdOpts struct {
+	Logger   *slog.Logger
+	AppID    string
+	Headless bool
 }
 
-type CtxOption func(*Context)
+type Option func(*CmdOpts)
 
-func CreateCtx(options ...CtxOption) *Context {
-	ctx := &Context{}
+func CreateCtx(options ...Option) *CmdOpts {
+	ctx := &CmdOpts{}
 	for _, option := range options {
 		option(ctx)
 	}
@@ -42,45 +41,22 @@ func CreateCtx(options ...CtxOption) *Context {
 	return ctx
 }
 
-func RunHeadless(opt bool) CtxOption {
-	return func(ctx *Context) {
+func RunHeadless(opt bool) Option {
+	return func(ctx *CmdOpts) {
 		ctx.Headless = opt
 	}
 }
 
-func WithProfileFlags(flags ProfileFlags) CtxOption {
-	return func(ctx *Context) {
-		ctx.Profile = flags
-	}
-}
-
-func WithAppID(id string) CtxOption {
-	return func(ctx *Context) {
+func WithAppID(id string) Option {
+	return func(ctx *CmdOpts) {
 		ctx.AppID = id
 	}
 }
 
-func WithLogLevel(level string) CtxOption {
-	return func(ctx *Context) {
-		ctx.LogLevel = level
+func WithLogger(logger *slog.Logger) Option {
+	return func(ctx *CmdOpts) {
+		ctx.Logger = logger
 	}
-}
-
-func WithLogFile(opt bool) CtxOption {
-	return func(ctx *Context) {
-		ctx.NoLogFile = opt
-	}
-}
-
-type ProfileFlags logging.ProfileFlags
-
-func (d ProfileFlags) AfterApply() error {
-	err := logging.StartProfiling(logging.ProfileFlags(d))
-	if err != nil {
-		return fmt.Errorf("could not start profiling: %w", err)
-	}
-
-	return nil
 }
 
 type HeadlessFlag bool
@@ -93,6 +69,15 @@ func (f *HeadlessFlag) AfterApply() error {
 	}
 
 	return nil
+}
+
+func newContext(opts *CmdOpts) (context.Context, context.CancelFunc) {
+	ctx, cancelFunc := context.WithCancel(context.Background())
+
+	ctx = logging.ToContext(ctx, opts.Logger)
+	ctx = preferences.AppIDToContext(ctx, opts.AppID)
+
+	return ctx, cancelFunc
 }
 
 func showHelpTxt(file string) string {

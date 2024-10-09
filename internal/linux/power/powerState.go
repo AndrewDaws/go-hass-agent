@@ -10,9 +10,12 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/joshuar/go-hass-agent/internal/hass/sensor"
+	"github.com/joshuar/go-hass-agent/internal/hass/sensor/types"
 	"github.com/joshuar/go-hass-agent/internal/linux"
+	"github.com/joshuar/go-hass-agent/internal/logging"
 	"github.com/joshuar/go-hass-agent/pkg/linux/dbusx"
 )
 
@@ -28,36 +31,44 @@ const (
 
 type powerSignal int
 
-type powerStateSensor struct {
-	linux.Sensor
-	signal powerSignal
+func newPowerState(name powerSignal, value any) sensor.Entity {
+	return sensor.Entity{
+		Name:     "Power State",
+		Category: types.CategoryDiagnostic,
+		State: &sensor.State{
+			ID:    "power_state",
+			Icon:  powerStateIcon(value),
+			Value: powerStateString(name, value),
+			Attributes: map[string]any{
+				"data_source": linux.DataSrcDbus,
+			},
+		},
+	}
 }
 
-func (s *powerStateSensor) State() any {
-	boolVal, ok := s.Value.(bool)
+func powerStateString(signal powerSignal, value any) string {
+	state, ok := value.(bool)
 	if !ok {
 		return sensor.StateUnknown
 	}
 
-	if boolVal {
-		switch s.signal {
-		case suspend:
-			return "Suspended"
-		case shutdown:
-			return "Powered Off"
-		}
+	switch {
+	case signal == suspend && state:
+		return "Suspended"
+	case signal == shutdown && state:
+		return "Powered Off"
+	default:
+		return "Powered On"
 	}
-
-	return "Powered On"
 }
 
-func (s *powerStateSensor) Icon() string {
-	str, ok := s.State().(string)
+func powerStateIcon(value any) string {
+	state, ok := value.(string)
 	if !ok {
-		str = ""
+		return "mdi:power-on"
 	}
 
-	switch str {
+	switch state {
 	case "Suspended":
 		return "mdi:power-sleep"
 	case "Powered Off":
@@ -67,26 +78,12 @@ func (s *powerStateSensor) Icon() string {
 	}
 }
 
-func newPowerState(signalName powerSignal, signalValue any) *powerStateSensor {
-	return &powerStateSensor{
-		signal: signalName,
-		Sensor: linux.Sensor{
-			DisplayName:  "Power State",
-			UniqueID:     "power_state",
-			Value:        signalValue,
-			DataSource:   linux.DataSrcDbus,
-			IsDiagnostic: true,
-		},
-	}
-}
-
 type stateWorker struct {
-	logger    *slog.Logger
 	triggerCh chan dbusx.Trigger
 }
 
-func (w *stateWorker) Events(ctx context.Context) (chan sensor.Details, error) {
-	sensorCh := make(chan sensor.Details)
+func (w *stateWorker) Events(ctx context.Context) (<-chan sensor.Entity, error) {
+	sensorCh := make(chan sensor.Entity)
 
 	// Watch for state changes.
 	go func() {
@@ -97,15 +94,11 @@ func (w *stateWorker) Events(ctx context.Context) (chan sensor.Details, error) {
 			case <-ctx.Done():
 				return
 			case event := <-w.triggerCh:
-				switch event.Signal {
-				case sleepSignal:
-					go func() {
-						sensorCh <- newPowerState(suspend, event.Content[0])
-					}()
-				case shutdownSignal:
-					go func() {
-						sensorCh <- newPowerState(shutdown, event.Content[0])
-					}()
+				switch {
+				case strings.HasSuffix(event.Signal, sleepSignal):
+					sensorCh <- newPowerState(suspend, event.Content[0])
+				case strings.HasSuffix(event.Signal, shutdownSignal):
+					sensorCh <- newPowerState(shutdown, event.Content[0])
 				}
 			}
 		}
@@ -115,7 +108,9 @@ func (w *stateWorker) Events(ctx context.Context) (chan sensor.Details, error) {
 	go func() {
 		sensors, err := w.Sensors(ctx)
 		if err != nil {
-			w.logger.Debug("Could not retrieve power state.", slog.Any("error", err))
+			logging.FromContext(ctx).
+				With(slog.String("worker", powerStateWorkerID)).
+				Debug("Could not retrieve power state.", slog.Any("error", err))
 
 			return
 		}
@@ -131,14 +126,16 @@ func (w *stateWorker) Events(ctx context.Context) (chan sensor.Details, error) {
 // Sensors returns the current sensors states. Assuming that if this is called,
 // then the machine is obviously running and not suspended, otherwise this
 // couldn't be called?
-func (w *stateWorker) Sensors(_ context.Context) ([]sensor.Details, error) {
-	return []sensor.Details{newPowerState(shutdown, false)}, nil
+func (w *stateWorker) Sensors(_ context.Context) ([]sensor.Entity, error) {
+	return []sensor.Entity{newPowerState(shutdown, false)}, nil
 }
 
-func NewStateWorker(ctx context.Context) (*linux.SensorWorker, error) {
+func NewStateWorker(ctx context.Context) (*linux.EventSensorWorker, error) {
+	worker := linux.NewEventWorker(powerStateWorkerID)
+
 	bus, ok := linux.CtxGetSystemBus(ctx)
 	if !ok {
-		return nil, linux.ErrNoSystemBus
+		return worker, linux.ErrNoSystemBus
 	}
 
 	triggerCh, err := dbusx.NewWatch(
@@ -147,14 +144,12 @@ func NewStateWorker(ctx context.Context) (*linux.SensorWorker, error) {
 		dbusx.MatchMembers(sleepSignal, shutdownSignal),
 	).Start(ctx, bus)
 	if err != nil {
-		return nil, fmt.Errorf("unable to set-up D-Bus watch for power state: %w", err)
+		return worker, fmt.Errorf("unable to set-up D-Bus watch for power state: %w", err)
 	}
 
-	return &linux.SensorWorker{
-			Value: &stateWorker{
-				triggerCh: triggerCh,
-			},
-			WorkerID: powerStateWorkerID,
-		},
-		nil
+	worker.EventType = &stateWorker{
+		triggerCh: triggerCh,
+	}
+
+	return worker, nil
 }

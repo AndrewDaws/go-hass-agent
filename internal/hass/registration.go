@@ -17,8 +17,6 @@ import (
 
 const (
 	RegistrationPath = "/api/mobile_app/registrations"
-	WebsocketPath    = "/api/websocket"
-	WebHookPath      = "/api/webhook/"
 )
 
 var ErrInternalValidationFailed = errors.New("internal validation error")
@@ -55,7 +53,11 @@ func RegisterDevice(ctx context.Context, device *preferences.Device, registratio
 	}
 
 	// Create a new client connection to Home Assistant at the registration path.
-	client := NewClient(ctx, nil, nil)
+	client, err := NewClient(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("could not start hass client: %w", err)
+	}
+
 	client.Endpoint(registration.Server+RegistrationPath, time.Minute)
 
 	// Register the device against the registration endpoint.

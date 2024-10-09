@@ -5,85 +5,79 @@ package agent
 
 import (
 	"context"
-	"github.com/joshuar/go-hass-agent/internal/agent/ui"
+	fyneui "github.com/joshuar/go-hass-agent/internal/agent/ui/fyneUI"
 	"github.com/joshuar/go-hass-agent/internal/hass/sensor"
 	"github.com/joshuar/go-hass-agent/internal/preferences"
 	mqttapi "github.com/joshuar/go-hass-anything/v11/pkg/mqtt"
 	"sync"
 )
 
-// Ensure, that UIMock does implement UI.
+// Ensure, that uiMock does implement ui.
 // If this is not the case, regenerate this file with moq.
-var _ UI = &UIMock{}
+var _ ui = &uiMock{}
 
-// UIMock is a mock implementation of UI.
+// uiMock is a mock implementation of ui.
 //
-//	func TestSomethingThatUsesUI(t *testing.T) {
+//	func TestSomethingThatUsesui(t *testing.T) {
 //
-//		// make and configure a mocked UI
-//		mockedUI := &UIMock{
-//			DisplayNotificationFunc: func(n ui.Notification)  {
+//		// make and configure a mocked ui
+//		mockedui := &uiMock{
+//			DisplayNotificationFunc: func(n fyneui.Notification)  {
 //				panic("mock out the DisplayNotification method")
 //			},
-//			DisplayRegistrationWindowFunc: func(prefs *preferences.Preferences, doneCh chan struct{}) chan struct{} {
+//			DisplayRegistrationWindowFunc: func(ctx context.Context, prefs *preferences.Registration) chan bool {
 //				panic("mock out the DisplayRegistrationWindow method")
 //			},
-//			DisplayTrayIconFunc: func(ctx context.Context, agent ui.Agent, client ui.HassClient, doneCh chan struct{})  {
+//			DisplayTrayIconFunc: func(ctx context.Context, cancelFunc context.CancelFunc)  {
 //				panic("mock out the DisplayTrayIcon method")
 //			},
-//			RunFunc: func(agent ui.Agent, doneCh chan struct{})  {
+//			RunFunc: func(ctx context.Context)  {
 //				panic("mock out the Run method")
 //			},
 //		}
 //
-//		// use mockedUI in code that requires UI
+//		// use mockedui in code that requires ui
 //		// and then make assertions.
 //
 //	}
-type UIMock struct {
+type uiMock struct {
 	// DisplayNotificationFunc mocks the DisplayNotification method.
-	DisplayNotificationFunc func(n ui.Notification)
+	DisplayNotificationFunc func(n fyneui.Notification)
 
 	// DisplayRegistrationWindowFunc mocks the DisplayRegistrationWindow method.
-	DisplayRegistrationWindowFunc func(prefs *preferences.Preferences, doneCh chan struct{}) chan struct{}
+	DisplayRegistrationWindowFunc func(ctx context.Context, prefs *preferences.Registration) chan bool
 
 	// DisplayTrayIconFunc mocks the DisplayTrayIcon method.
-	DisplayTrayIconFunc func(ctx context.Context, agent ui.Agent, client ui.HassClient, doneCh chan struct{})
+	DisplayTrayIconFunc func(ctx context.Context, cancelFunc context.CancelFunc)
 
 	// RunFunc mocks the Run method.
-	RunFunc func(agent ui.Agent, doneCh chan struct{})
+	RunFunc func(ctx context.Context)
 
 	// calls tracks calls to the methods.
 	calls struct {
 		// DisplayNotification holds details about calls to the DisplayNotification method.
 		DisplayNotification []struct {
 			// N is the n argument value.
-			N ui.Notification
+			N fyneui.Notification
 		}
 		// DisplayRegistrationWindow holds details about calls to the DisplayRegistrationWindow method.
 		DisplayRegistrationWindow []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
 			// Prefs is the prefs argument value.
-			Prefs *preferences.Preferences
-			// DoneCh is the doneCh argument value.
-			DoneCh chan struct{}
+			Prefs *preferences.Registration
 		}
 		// DisplayTrayIcon holds details about calls to the DisplayTrayIcon method.
 		DisplayTrayIcon []struct {
 			// Ctx is the ctx argument value.
 			Ctx context.Context
-			// Agent is the agent argument value.
-			Agent ui.Agent
-			// Client is the client argument value.
-			Client ui.HassClient
-			// DoneCh is the doneCh argument value.
-			DoneCh chan struct{}
+			// CancelFunc is the cancelFunc argument value.
+			CancelFunc context.CancelFunc
 		}
 		// Run holds details about calls to the Run method.
 		Run []struct {
-			// Agent is the agent argument value.
-			Agent ui.Agent
-			// DoneCh is the doneCh argument value.
-			DoneCh chan struct{}
+			// Ctx is the ctx argument value.
+			Ctx context.Context
 		}
 	}
 	lockDisplayNotification       sync.RWMutex
@@ -93,12 +87,12 @@ type UIMock struct {
 }
 
 // DisplayNotification calls DisplayNotificationFunc.
-func (mock *UIMock) DisplayNotification(n ui.Notification) {
+func (mock *uiMock) DisplayNotification(n fyneui.Notification) {
 	if mock.DisplayNotificationFunc == nil {
-		panic("UIMock.DisplayNotificationFunc: method is nil but UI.DisplayNotification was just called")
+		panic("uiMock.DisplayNotificationFunc: method is nil but ui.DisplayNotification was just called")
 	}
 	callInfo := struct {
-		N ui.Notification
+		N fyneui.Notification
 	}{
 		N: n,
 	}
@@ -111,12 +105,12 @@ func (mock *UIMock) DisplayNotification(n ui.Notification) {
 // DisplayNotificationCalls gets all the calls that were made to DisplayNotification.
 // Check the length with:
 //
-//	len(mockedUI.DisplayNotificationCalls())
-func (mock *UIMock) DisplayNotificationCalls() []struct {
-	N ui.Notification
+//	len(mockedui.DisplayNotificationCalls())
+func (mock *uiMock) DisplayNotificationCalls() []struct {
+	N fyneui.Notification
 } {
 	var calls []struct {
-		N ui.Notification
+		N fyneui.Notification
 	}
 	mock.lockDisplayNotification.RLock()
 	calls = mock.calls.DisplayNotification
@@ -125,34 +119,34 @@ func (mock *UIMock) DisplayNotificationCalls() []struct {
 }
 
 // DisplayRegistrationWindow calls DisplayRegistrationWindowFunc.
-func (mock *UIMock) DisplayRegistrationWindow(prefs *preferences.Preferences, doneCh chan struct{}) chan struct{} {
+func (mock *uiMock) DisplayRegistrationWindow(ctx context.Context, prefs *preferences.Registration) chan bool {
 	if mock.DisplayRegistrationWindowFunc == nil {
-		panic("UIMock.DisplayRegistrationWindowFunc: method is nil but UI.DisplayRegistrationWindow was just called")
+		panic("uiMock.DisplayRegistrationWindowFunc: method is nil but ui.DisplayRegistrationWindow was just called")
 	}
 	callInfo := struct {
-		Prefs  *preferences.Preferences
-		DoneCh chan struct{}
+		Ctx   context.Context
+		Prefs *preferences.Registration
 	}{
-		Prefs:  prefs,
-		DoneCh: doneCh,
+		Ctx:   ctx,
+		Prefs: prefs,
 	}
 	mock.lockDisplayRegistrationWindow.Lock()
 	mock.calls.DisplayRegistrationWindow = append(mock.calls.DisplayRegistrationWindow, callInfo)
 	mock.lockDisplayRegistrationWindow.Unlock()
-	return mock.DisplayRegistrationWindowFunc(prefs, doneCh)
+	return mock.DisplayRegistrationWindowFunc(ctx, prefs)
 }
 
 // DisplayRegistrationWindowCalls gets all the calls that were made to DisplayRegistrationWindow.
 // Check the length with:
 //
-//	len(mockedUI.DisplayRegistrationWindowCalls())
-func (mock *UIMock) DisplayRegistrationWindowCalls() []struct {
-	Prefs  *preferences.Preferences
-	DoneCh chan struct{}
+//	len(mockedui.DisplayRegistrationWindowCalls())
+func (mock *uiMock) DisplayRegistrationWindowCalls() []struct {
+	Ctx   context.Context
+	Prefs *preferences.Registration
 } {
 	var calls []struct {
-		Prefs  *preferences.Preferences
-		DoneCh chan struct{}
+		Ctx   context.Context
+		Prefs *preferences.Registration
 	}
 	mock.lockDisplayRegistrationWindow.RLock()
 	calls = mock.calls.DisplayRegistrationWindow
@@ -161,42 +155,34 @@ func (mock *UIMock) DisplayRegistrationWindowCalls() []struct {
 }
 
 // DisplayTrayIcon calls DisplayTrayIconFunc.
-func (mock *UIMock) DisplayTrayIcon(ctx context.Context, agent ui.Agent, client ui.HassClient, doneCh chan struct{}) {
+func (mock *uiMock) DisplayTrayIcon(ctx context.Context, cancelFunc context.CancelFunc) {
 	if mock.DisplayTrayIconFunc == nil {
-		panic("UIMock.DisplayTrayIconFunc: method is nil but UI.DisplayTrayIcon was just called")
+		panic("uiMock.DisplayTrayIconFunc: method is nil but ui.DisplayTrayIcon was just called")
 	}
 	callInfo := struct {
-		Ctx    context.Context
-		Agent  ui.Agent
-		Client ui.HassClient
-		DoneCh chan struct{}
+		Ctx        context.Context
+		CancelFunc context.CancelFunc
 	}{
-		Ctx:    ctx,
-		Agent:  agent,
-		Client: client,
-		DoneCh: doneCh,
+		Ctx:        ctx,
+		CancelFunc: cancelFunc,
 	}
 	mock.lockDisplayTrayIcon.Lock()
 	mock.calls.DisplayTrayIcon = append(mock.calls.DisplayTrayIcon, callInfo)
 	mock.lockDisplayTrayIcon.Unlock()
-	mock.DisplayTrayIconFunc(ctx, agent, client, doneCh)
+	mock.DisplayTrayIconFunc(ctx, cancelFunc)
 }
 
 // DisplayTrayIconCalls gets all the calls that were made to DisplayTrayIcon.
 // Check the length with:
 //
-//	len(mockedUI.DisplayTrayIconCalls())
-func (mock *UIMock) DisplayTrayIconCalls() []struct {
-	Ctx    context.Context
-	Agent  ui.Agent
-	Client ui.HassClient
-	DoneCh chan struct{}
+//	len(mockedui.DisplayTrayIconCalls())
+func (mock *uiMock) DisplayTrayIconCalls() []struct {
+	Ctx        context.Context
+	CancelFunc context.CancelFunc
 } {
 	var calls []struct {
-		Ctx    context.Context
-		Agent  ui.Agent
-		Client ui.HassClient
-		DoneCh chan struct{}
+		Ctx        context.Context
+		CancelFunc context.CancelFunc
 	}
 	mock.lockDisplayTrayIcon.RLock()
 	calls = mock.calls.DisplayTrayIcon
@@ -205,432 +191,34 @@ func (mock *UIMock) DisplayTrayIconCalls() []struct {
 }
 
 // Run calls RunFunc.
-func (mock *UIMock) Run(agent ui.Agent, doneCh chan struct{}) {
+func (mock *uiMock) Run(ctx context.Context) {
 	if mock.RunFunc == nil {
-		panic("UIMock.RunFunc: method is nil but UI.Run was just called")
+		panic("uiMock.RunFunc: method is nil but ui.Run was just called")
 	}
 	callInfo := struct {
-		Agent  ui.Agent
-		DoneCh chan struct{}
+		Ctx context.Context
 	}{
-		Agent:  agent,
-		DoneCh: doneCh,
+		Ctx: ctx,
 	}
 	mock.lockRun.Lock()
 	mock.calls.Run = append(mock.calls.Run, callInfo)
 	mock.lockRun.Unlock()
-	mock.RunFunc(agent, doneCh)
+	mock.RunFunc(ctx)
 }
 
 // RunCalls gets all the calls that were made to Run.
 // Check the length with:
 //
-//	len(mockedUI.RunCalls())
-func (mock *UIMock) RunCalls() []struct {
-	Agent  ui.Agent
-	DoneCh chan struct{}
+//	len(mockedui.RunCalls())
+func (mock *uiMock) RunCalls() []struct {
+	Ctx context.Context
 } {
 	var calls []struct {
-		Agent  ui.Agent
-		DoneCh chan struct{}
+		Ctx context.Context
 	}
 	mock.lockRun.RLock()
 	calls = mock.calls.Run
 	mock.lockRun.RUnlock()
-	return calls
-}
-
-// Ensure, that RegistryMock does implement Registry.
-// If this is not the case, regenerate this file with moq.
-var _ Registry = &RegistryMock{}
-
-// RegistryMock is a mock implementation of Registry.
-//
-//	func TestSomethingThatUsesRegistry(t *testing.T) {
-//
-//		// make and configure a mocked Registry
-//		mockedRegistry := &RegistryMock{
-//			IsDisabledFunc: func(id string) bool {
-//				panic("mock out the IsDisabled method")
-//			},
-//			IsRegisteredFunc: func(id string) bool {
-//				panic("mock out the IsRegistered method")
-//			},
-//			SetDisabledFunc: func(id string, state bool) error {
-//				panic("mock out the SetDisabled method")
-//			},
-//			SetRegisteredFunc: func(id string, state bool) error {
-//				panic("mock out the SetRegistered method")
-//			},
-//		}
-//
-//		// use mockedRegistry in code that requires Registry
-//		// and then make assertions.
-//
-//	}
-type RegistryMock struct {
-	// IsDisabledFunc mocks the IsDisabled method.
-	IsDisabledFunc func(id string) bool
-
-	// IsRegisteredFunc mocks the IsRegistered method.
-	IsRegisteredFunc func(id string) bool
-
-	// SetDisabledFunc mocks the SetDisabled method.
-	SetDisabledFunc func(id string, state bool) error
-
-	// SetRegisteredFunc mocks the SetRegistered method.
-	SetRegisteredFunc func(id string, state bool) error
-
-	// calls tracks calls to the methods.
-	calls struct {
-		// IsDisabled holds details about calls to the IsDisabled method.
-		IsDisabled []struct {
-			// ID is the id argument value.
-			ID string
-		}
-		// IsRegistered holds details about calls to the IsRegistered method.
-		IsRegistered []struct {
-			// ID is the id argument value.
-			ID string
-		}
-		// SetDisabled holds details about calls to the SetDisabled method.
-		SetDisabled []struct {
-			// ID is the id argument value.
-			ID string
-			// State is the state argument value.
-			State bool
-		}
-		// SetRegistered holds details about calls to the SetRegistered method.
-		SetRegistered []struct {
-			// ID is the id argument value.
-			ID string
-			// State is the state argument value.
-			State bool
-		}
-	}
-	lockIsDisabled    sync.RWMutex
-	lockIsRegistered  sync.RWMutex
-	lockSetDisabled   sync.RWMutex
-	lockSetRegistered sync.RWMutex
-}
-
-// IsDisabled calls IsDisabledFunc.
-func (mock *RegistryMock) IsDisabled(id string) bool {
-	if mock.IsDisabledFunc == nil {
-		panic("RegistryMock.IsDisabledFunc: method is nil but Registry.IsDisabled was just called")
-	}
-	callInfo := struct {
-		ID string
-	}{
-		ID: id,
-	}
-	mock.lockIsDisabled.Lock()
-	mock.calls.IsDisabled = append(mock.calls.IsDisabled, callInfo)
-	mock.lockIsDisabled.Unlock()
-	return mock.IsDisabledFunc(id)
-}
-
-// IsDisabledCalls gets all the calls that were made to IsDisabled.
-// Check the length with:
-//
-//	len(mockedRegistry.IsDisabledCalls())
-func (mock *RegistryMock) IsDisabledCalls() []struct {
-	ID string
-} {
-	var calls []struct {
-		ID string
-	}
-	mock.lockIsDisabled.RLock()
-	calls = mock.calls.IsDisabled
-	mock.lockIsDisabled.RUnlock()
-	return calls
-}
-
-// IsRegistered calls IsRegisteredFunc.
-func (mock *RegistryMock) IsRegistered(id string) bool {
-	if mock.IsRegisteredFunc == nil {
-		panic("RegistryMock.IsRegisteredFunc: method is nil but Registry.IsRegistered was just called")
-	}
-	callInfo := struct {
-		ID string
-	}{
-		ID: id,
-	}
-	mock.lockIsRegistered.Lock()
-	mock.calls.IsRegistered = append(mock.calls.IsRegistered, callInfo)
-	mock.lockIsRegistered.Unlock()
-	return mock.IsRegisteredFunc(id)
-}
-
-// IsRegisteredCalls gets all the calls that were made to IsRegistered.
-// Check the length with:
-//
-//	len(mockedRegistry.IsRegisteredCalls())
-func (mock *RegistryMock) IsRegisteredCalls() []struct {
-	ID string
-} {
-	var calls []struct {
-		ID string
-	}
-	mock.lockIsRegistered.RLock()
-	calls = mock.calls.IsRegistered
-	mock.lockIsRegistered.RUnlock()
-	return calls
-}
-
-// SetDisabled calls SetDisabledFunc.
-func (mock *RegistryMock) SetDisabled(id string, state bool) error {
-	if mock.SetDisabledFunc == nil {
-		panic("RegistryMock.SetDisabledFunc: method is nil but Registry.SetDisabled was just called")
-	}
-	callInfo := struct {
-		ID    string
-		State bool
-	}{
-		ID:    id,
-		State: state,
-	}
-	mock.lockSetDisabled.Lock()
-	mock.calls.SetDisabled = append(mock.calls.SetDisabled, callInfo)
-	mock.lockSetDisabled.Unlock()
-	return mock.SetDisabledFunc(id, state)
-}
-
-// SetDisabledCalls gets all the calls that were made to SetDisabled.
-// Check the length with:
-//
-//	len(mockedRegistry.SetDisabledCalls())
-func (mock *RegistryMock) SetDisabledCalls() []struct {
-	ID    string
-	State bool
-} {
-	var calls []struct {
-		ID    string
-		State bool
-	}
-	mock.lockSetDisabled.RLock()
-	calls = mock.calls.SetDisabled
-	mock.lockSetDisabled.RUnlock()
-	return calls
-}
-
-// SetRegistered calls SetRegisteredFunc.
-func (mock *RegistryMock) SetRegistered(id string, state bool) error {
-	if mock.SetRegisteredFunc == nil {
-		panic("RegistryMock.SetRegisteredFunc: method is nil but Registry.SetRegistered was just called")
-	}
-	callInfo := struct {
-		ID    string
-		State bool
-	}{
-		ID:    id,
-		State: state,
-	}
-	mock.lockSetRegistered.Lock()
-	mock.calls.SetRegistered = append(mock.calls.SetRegistered, callInfo)
-	mock.lockSetRegistered.Unlock()
-	return mock.SetRegisteredFunc(id, state)
-}
-
-// SetRegisteredCalls gets all the calls that were made to SetRegistered.
-// Check the length with:
-//
-//	len(mockedRegistry.SetRegisteredCalls())
-func (mock *RegistryMock) SetRegisteredCalls() []struct {
-	ID    string
-	State bool
-} {
-	var calls []struct {
-		ID    string
-		State bool
-	}
-	mock.lockSetRegistered.RLock()
-	calls = mock.calls.SetRegistered
-	mock.lockSetRegistered.RUnlock()
-	return calls
-}
-
-// Ensure, that TrackerMock does implement Tracker.
-// If this is not the case, regenerate this file with moq.
-var _ Tracker = &TrackerMock{}
-
-// TrackerMock is a mock implementation of Tracker.
-//
-//	func TestSomethingThatUsesTracker(t *testing.T) {
-//
-//		// make and configure a mocked Tracker
-//		mockedTracker := &TrackerMock{
-//			AddFunc: func(details sensor.Details) error {
-//				panic("mock out the Add method")
-//			},
-//			GetFunc: func(key string) (sensor.Details, error) {
-//				panic("mock out the Get method")
-//			},
-//			ResetFunc: func()  {
-//				panic("mock out the Reset method")
-//			},
-//			SensorListFunc: func() []string {
-//				panic("mock out the SensorList method")
-//			},
-//		}
-//
-//		// use mockedTracker in code that requires Tracker
-//		// and then make assertions.
-//
-//	}
-type TrackerMock struct {
-	// AddFunc mocks the Add method.
-	AddFunc func(details sensor.Details) error
-
-	// GetFunc mocks the Get method.
-	GetFunc func(key string) (sensor.Details, error)
-
-	// ResetFunc mocks the Reset method.
-	ResetFunc func()
-
-	// SensorListFunc mocks the SensorList method.
-	SensorListFunc func() []string
-
-	// calls tracks calls to the methods.
-	calls struct {
-		// Add holds details about calls to the Add method.
-		Add []struct {
-			// Details is the details argument value.
-			Details sensor.Details
-		}
-		// Get holds details about calls to the Get method.
-		Get []struct {
-			// Key is the key argument value.
-			Key string
-		}
-		// Reset holds details about calls to the Reset method.
-		Reset []struct {
-		}
-		// SensorList holds details about calls to the SensorList method.
-		SensorList []struct {
-		}
-	}
-	lockAdd        sync.RWMutex
-	lockGet        sync.RWMutex
-	lockReset      sync.RWMutex
-	lockSensorList sync.RWMutex
-}
-
-// Add calls AddFunc.
-func (mock *TrackerMock) Add(details sensor.Details) error {
-	if mock.AddFunc == nil {
-		panic("TrackerMock.AddFunc: method is nil but Tracker.Add was just called")
-	}
-	callInfo := struct {
-		Details sensor.Details
-	}{
-		Details: details,
-	}
-	mock.lockAdd.Lock()
-	mock.calls.Add = append(mock.calls.Add, callInfo)
-	mock.lockAdd.Unlock()
-	return mock.AddFunc(details)
-}
-
-// AddCalls gets all the calls that were made to Add.
-// Check the length with:
-//
-//	len(mockedTracker.AddCalls())
-func (mock *TrackerMock) AddCalls() []struct {
-	Details sensor.Details
-} {
-	var calls []struct {
-		Details sensor.Details
-	}
-	mock.lockAdd.RLock()
-	calls = mock.calls.Add
-	mock.lockAdd.RUnlock()
-	return calls
-}
-
-// Get calls GetFunc.
-func (mock *TrackerMock) Get(key string) (sensor.Details, error) {
-	if mock.GetFunc == nil {
-		panic("TrackerMock.GetFunc: method is nil but Tracker.Get was just called")
-	}
-	callInfo := struct {
-		Key string
-	}{
-		Key: key,
-	}
-	mock.lockGet.Lock()
-	mock.calls.Get = append(mock.calls.Get, callInfo)
-	mock.lockGet.Unlock()
-	return mock.GetFunc(key)
-}
-
-// GetCalls gets all the calls that were made to Get.
-// Check the length with:
-//
-//	len(mockedTracker.GetCalls())
-func (mock *TrackerMock) GetCalls() []struct {
-	Key string
-} {
-	var calls []struct {
-		Key string
-	}
-	mock.lockGet.RLock()
-	calls = mock.calls.Get
-	mock.lockGet.RUnlock()
-	return calls
-}
-
-// Reset calls ResetFunc.
-func (mock *TrackerMock) Reset() {
-	if mock.ResetFunc == nil {
-		panic("TrackerMock.ResetFunc: method is nil but Tracker.Reset was just called")
-	}
-	callInfo := struct {
-	}{}
-	mock.lockReset.Lock()
-	mock.calls.Reset = append(mock.calls.Reset, callInfo)
-	mock.lockReset.Unlock()
-	mock.ResetFunc()
-}
-
-// ResetCalls gets all the calls that were made to Reset.
-// Check the length with:
-//
-//	len(mockedTracker.ResetCalls())
-func (mock *TrackerMock) ResetCalls() []struct {
-} {
-	var calls []struct {
-	}
-	mock.lockReset.RLock()
-	calls = mock.calls.Reset
-	mock.lockReset.RUnlock()
-	return calls
-}
-
-// SensorList calls SensorListFunc.
-func (mock *TrackerMock) SensorList() []string {
-	if mock.SensorListFunc == nil {
-		panic("TrackerMock.SensorListFunc: method is nil but Tracker.SensorList was just called")
-	}
-	callInfo := struct {
-	}{}
-	mock.lockSensorList.Lock()
-	mock.calls.SensorList = append(mock.calls.SensorList, callInfo)
-	mock.lockSensorList.Unlock()
-	return mock.SensorListFunc()
-}
-
-// SensorListCalls gets all the calls that were made to SensorList.
-// Check the length with:
-//
-//	len(mockedTracker.SensorListCalls())
-func (mock *TrackerMock) SensorListCalls() []struct {
-} {
-	var calls []struct {
-	}
-	mock.lockSensorList.RLock()
-	calls = mock.calls.SensorList
-	mock.lockSensorList.RUnlock()
 	return calls
 }
 
@@ -647,20 +235,20 @@ var _ SensorController = &SensorControllerMock{}
 //			ActiveWorkersFunc: func() []string {
 //				panic("mock out the ActiveWorkers method")
 //			},
+//			IDFunc: func() string {
+//				panic("mock out the ID method")
+//			},
 //			InactiveWorkersFunc: func() []string {
 //				panic("mock out the InactiveWorkers method")
 //			},
-//			StartFunc: func(ctx context.Context, name string) (<-chan sensor.Details, error) {
+//			StartFunc: func(ctx context.Context, name string) (<-chan sensor.Entity, error) {
 //				panic("mock out the Start method")
 //			},
-//			StartAllFunc: func(ctx context.Context) (<-chan sensor.Details, error) {
-//				panic("mock out the StartAll method")
+//			StatesFunc: func(ctx context.Context) []sensor.Entity {
+//				panic("mock out the States method")
 //			},
 //			StopFunc: func(name string) error {
 //				panic("mock out the Stop method")
-//			},
-//			StopAllFunc: func() error {
-//				panic("mock out the StopAll method")
 //			},
 //		}
 //
@@ -672,25 +260,28 @@ type SensorControllerMock struct {
 	// ActiveWorkersFunc mocks the ActiveWorkers method.
 	ActiveWorkersFunc func() []string
 
+	// IDFunc mocks the ID method.
+	IDFunc func() string
+
 	// InactiveWorkersFunc mocks the InactiveWorkers method.
 	InactiveWorkersFunc func() []string
 
 	// StartFunc mocks the Start method.
-	StartFunc func(ctx context.Context, name string) (<-chan sensor.Details, error)
+	StartFunc func(ctx context.Context, name string) (<-chan sensor.Entity, error)
 
-	// StartAllFunc mocks the StartAll method.
-	StartAllFunc func(ctx context.Context) (<-chan sensor.Details, error)
+	// StatesFunc mocks the States method.
+	StatesFunc func(ctx context.Context) []sensor.Entity
 
 	// StopFunc mocks the Stop method.
 	StopFunc func(name string) error
-
-	// StopAllFunc mocks the StopAll method.
-	StopAllFunc func() error
 
 	// calls tracks calls to the methods.
 	calls struct {
 		// ActiveWorkers holds details about calls to the ActiveWorkers method.
 		ActiveWorkers []struct {
+		}
+		// ID holds details about calls to the ID method.
+		ID []struct {
 		}
 		// InactiveWorkers holds details about calls to the InactiveWorkers method.
 		InactiveWorkers []struct {
@@ -702,8 +293,8 @@ type SensorControllerMock struct {
 			// Name is the name argument value.
 			Name string
 		}
-		// StartAll holds details about calls to the StartAll method.
-		StartAll []struct {
+		// States holds details about calls to the States method.
+		States []struct {
 			// Ctx is the ctx argument value.
 			Ctx context.Context
 		}
@@ -712,16 +303,13 @@ type SensorControllerMock struct {
 			// Name is the name argument value.
 			Name string
 		}
-		// StopAll holds details about calls to the StopAll method.
-		StopAll []struct {
-		}
 	}
 	lockActiveWorkers   sync.RWMutex
+	lockID              sync.RWMutex
 	lockInactiveWorkers sync.RWMutex
 	lockStart           sync.RWMutex
-	lockStartAll        sync.RWMutex
+	lockStates          sync.RWMutex
 	lockStop            sync.RWMutex
-	lockStopAll         sync.RWMutex
 }
 
 // ActiveWorkers calls ActiveWorkersFunc.
@@ -748,6 +336,33 @@ func (mock *SensorControllerMock) ActiveWorkersCalls() []struct {
 	mock.lockActiveWorkers.RLock()
 	calls = mock.calls.ActiveWorkers
 	mock.lockActiveWorkers.RUnlock()
+	return calls
+}
+
+// ID calls IDFunc.
+func (mock *SensorControllerMock) ID() string {
+	if mock.IDFunc == nil {
+		panic("SensorControllerMock.IDFunc: method is nil but SensorController.ID was just called")
+	}
+	callInfo := struct {
+	}{}
+	mock.lockID.Lock()
+	mock.calls.ID = append(mock.calls.ID, callInfo)
+	mock.lockID.Unlock()
+	return mock.IDFunc()
+}
+
+// IDCalls gets all the calls that were made to ID.
+// Check the length with:
+//
+//	len(mockedSensorController.IDCalls())
+func (mock *SensorControllerMock) IDCalls() []struct {
+} {
+	var calls []struct {
+	}
+	mock.lockID.RLock()
+	calls = mock.calls.ID
+	mock.lockID.RUnlock()
 	return calls
 }
 
@@ -779,7 +394,7 @@ func (mock *SensorControllerMock) InactiveWorkersCalls() []struct {
 }
 
 // Start calls StartFunc.
-func (mock *SensorControllerMock) Start(ctx context.Context, name string) (<-chan sensor.Details, error) {
+func (mock *SensorControllerMock) Start(ctx context.Context, name string) (<-chan sensor.Entity, error) {
 	if mock.StartFunc == nil {
 		panic("SensorControllerMock.StartFunc: method is nil but SensorController.Start was just called")
 	}
@@ -814,35 +429,35 @@ func (mock *SensorControllerMock) StartCalls() []struct {
 	return calls
 }
 
-// StartAll calls StartAllFunc.
-func (mock *SensorControllerMock) StartAll(ctx context.Context) (<-chan sensor.Details, error) {
-	if mock.StartAllFunc == nil {
-		panic("SensorControllerMock.StartAllFunc: method is nil but SensorController.StartAll was just called")
+// States calls StatesFunc.
+func (mock *SensorControllerMock) States(ctx context.Context) []sensor.Entity {
+	if mock.StatesFunc == nil {
+		panic("SensorControllerMock.StatesFunc: method is nil but SensorController.States was just called")
 	}
 	callInfo := struct {
 		Ctx context.Context
 	}{
 		Ctx: ctx,
 	}
-	mock.lockStartAll.Lock()
-	mock.calls.StartAll = append(mock.calls.StartAll, callInfo)
-	mock.lockStartAll.Unlock()
-	return mock.StartAllFunc(ctx)
+	mock.lockStates.Lock()
+	mock.calls.States = append(mock.calls.States, callInfo)
+	mock.lockStates.Unlock()
+	return mock.StatesFunc(ctx)
 }
 
-// StartAllCalls gets all the calls that were made to StartAll.
+// StatesCalls gets all the calls that were made to States.
 // Check the length with:
 //
-//	len(mockedSensorController.StartAllCalls())
-func (mock *SensorControllerMock) StartAllCalls() []struct {
+//	len(mockedSensorController.StatesCalls())
+func (mock *SensorControllerMock) StatesCalls() []struct {
 	Ctx context.Context
 } {
 	var calls []struct {
 		Ctx context.Context
 	}
-	mock.lockStartAll.RLock()
-	calls = mock.calls.StartAll
-	mock.lockStartAll.RUnlock()
+	mock.lockStates.RLock()
+	calls = mock.calls.States
+	mock.lockStates.RUnlock()
 	return calls
 }
 
@@ -875,33 +490,6 @@ func (mock *SensorControllerMock) StopCalls() []struct {
 	mock.lockStop.RLock()
 	calls = mock.calls.Stop
 	mock.lockStop.RUnlock()
-	return calls
-}
-
-// StopAll calls StopAllFunc.
-func (mock *SensorControllerMock) StopAll() error {
-	if mock.StopAllFunc == nil {
-		panic("SensorControllerMock.StopAllFunc: method is nil but SensorController.StopAll was just called")
-	}
-	callInfo := struct {
-	}{}
-	mock.lockStopAll.Lock()
-	mock.calls.StopAll = append(mock.calls.StopAll, callInfo)
-	mock.lockStopAll.Unlock()
-	return mock.StopAllFunc()
-}
-
-// StopAllCalls gets all the calls that were made to StopAll.
-// Check the length with:
-//
-//	len(mockedSensorController.StopAllCalls())
-func (mock *SensorControllerMock) StopAllCalls() []struct {
-} {
-	var calls []struct {
-	}
-	mock.lockStopAll.RLock()
-	calls = mock.calls.StopAll
-	mock.lockStopAll.RUnlock()
 	return calls
 }
 
@@ -1035,189 +623,5 @@ func (mock *MQTTControllerMock) SubscriptionsCalls() []struct {
 	mock.lockSubscriptions.RLock()
 	calls = mock.calls.Subscriptions
 	mock.lockSubscriptions.RUnlock()
-	return calls
-}
-
-// Ensure, that WorkerMock does implement Worker.
-// If this is not the case, regenerate this file with moq.
-var _ Worker = &WorkerMock{}
-
-// WorkerMock is a mock implementation of Worker.
-//
-//	func TestSomethingThatUsesWorker(t *testing.T) {
-//
-//		// make and configure a mocked Worker
-//		mockedWorker := &WorkerMock{
-//			IDFunc: func() string {
-//				panic("mock out the ID method")
-//			},
-//			SensorsFunc: func(ctx context.Context) ([]sensor.Details, error) {
-//				panic("mock out the Sensors method")
-//			},
-//			StopFunc: func() error {
-//				panic("mock out the Stop method")
-//			},
-//			UpdatesFunc: func(ctx context.Context) (<-chan sensor.Details, error) {
-//				panic("mock out the Updates method")
-//			},
-//		}
-//
-//		// use mockedWorker in code that requires Worker
-//		// and then make assertions.
-//
-//	}
-type WorkerMock struct {
-	// IDFunc mocks the ID method.
-	IDFunc func() string
-
-	// SensorsFunc mocks the Sensors method.
-	SensorsFunc func(ctx context.Context) ([]sensor.Details, error)
-
-	// StopFunc mocks the Stop method.
-	StopFunc func() error
-
-	// UpdatesFunc mocks the Updates method.
-	UpdatesFunc func(ctx context.Context) (<-chan sensor.Details, error)
-
-	// calls tracks calls to the methods.
-	calls struct {
-		// ID holds details about calls to the ID method.
-		ID []struct {
-		}
-		// Sensors holds details about calls to the Sensors method.
-		Sensors []struct {
-			// Ctx is the ctx argument value.
-			Ctx context.Context
-		}
-		// Stop holds details about calls to the Stop method.
-		Stop []struct {
-		}
-		// Updates holds details about calls to the Updates method.
-		Updates []struct {
-			// Ctx is the ctx argument value.
-			Ctx context.Context
-		}
-	}
-	lockID      sync.RWMutex
-	lockSensors sync.RWMutex
-	lockStop    sync.RWMutex
-	lockUpdates sync.RWMutex
-}
-
-// ID calls IDFunc.
-func (mock *WorkerMock) ID() string {
-	if mock.IDFunc == nil {
-		panic("WorkerMock.IDFunc: method is nil but Worker.ID was just called")
-	}
-	callInfo := struct {
-	}{}
-	mock.lockID.Lock()
-	mock.calls.ID = append(mock.calls.ID, callInfo)
-	mock.lockID.Unlock()
-	return mock.IDFunc()
-}
-
-// IDCalls gets all the calls that were made to ID.
-// Check the length with:
-//
-//	len(mockedWorker.IDCalls())
-func (mock *WorkerMock) IDCalls() []struct {
-} {
-	var calls []struct {
-	}
-	mock.lockID.RLock()
-	calls = mock.calls.ID
-	mock.lockID.RUnlock()
-	return calls
-}
-
-// Sensors calls SensorsFunc.
-func (mock *WorkerMock) Sensors(ctx context.Context) ([]sensor.Details, error) {
-	if mock.SensorsFunc == nil {
-		panic("WorkerMock.SensorsFunc: method is nil but Worker.Sensors was just called")
-	}
-	callInfo := struct {
-		Ctx context.Context
-	}{
-		Ctx: ctx,
-	}
-	mock.lockSensors.Lock()
-	mock.calls.Sensors = append(mock.calls.Sensors, callInfo)
-	mock.lockSensors.Unlock()
-	return mock.SensorsFunc(ctx)
-}
-
-// SensorsCalls gets all the calls that were made to Sensors.
-// Check the length with:
-//
-//	len(mockedWorker.SensorsCalls())
-func (mock *WorkerMock) SensorsCalls() []struct {
-	Ctx context.Context
-} {
-	var calls []struct {
-		Ctx context.Context
-	}
-	mock.lockSensors.RLock()
-	calls = mock.calls.Sensors
-	mock.lockSensors.RUnlock()
-	return calls
-}
-
-// Stop calls StopFunc.
-func (mock *WorkerMock) Stop() error {
-	if mock.StopFunc == nil {
-		panic("WorkerMock.StopFunc: method is nil but Worker.Stop was just called")
-	}
-	callInfo := struct {
-	}{}
-	mock.lockStop.Lock()
-	mock.calls.Stop = append(mock.calls.Stop, callInfo)
-	mock.lockStop.Unlock()
-	return mock.StopFunc()
-}
-
-// StopCalls gets all the calls that were made to Stop.
-// Check the length with:
-//
-//	len(mockedWorker.StopCalls())
-func (mock *WorkerMock) StopCalls() []struct {
-} {
-	var calls []struct {
-	}
-	mock.lockStop.RLock()
-	calls = mock.calls.Stop
-	mock.lockStop.RUnlock()
-	return calls
-}
-
-// Updates calls UpdatesFunc.
-func (mock *WorkerMock) Updates(ctx context.Context) (<-chan sensor.Details, error) {
-	if mock.UpdatesFunc == nil {
-		panic("WorkerMock.UpdatesFunc: method is nil but Worker.Updates was just called")
-	}
-	callInfo := struct {
-		Ctx context.Context
-	}{
-		Ctx: ctx,
-	}
-	mock.lockUpdates.Lock()
-	mock.calls.Updates = append(mock.calls.Updates, callInfo)
-	mock.lockUpdates.Unlock()
-	return mock.UpdatesFunc(ctx)
-}
-
-// UpdatesCalls gets all the calls that were made to Updates.
-// Check the length with:
-//
-//	len(mockedWorker.UpdatesCalls())
-func (mock *WorkerMock) UpdatesCalls() []struct {
-	Ctx context.Context
-} {
-	var calls []struct {
-		Ctx context.Context
-	}
-	mock.lockUpdates.RLock()
-	calls = mock.calls.Updates
-	mock.lockUpdates.RUnlock()
 	return calls
 }

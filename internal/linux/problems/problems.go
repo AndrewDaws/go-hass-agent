@@ -10,14 +10,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"strconv"
 	"time"
 
 	"github.com/joshuar/go-hass-agent/internal/hass/sensor"
 	"github.com/joshuar/go-hass-agent/internal/hass/sensor/types"
 	"github.com/joshuar/go-hass-agent/internal/linux"
-	"github.com/joshuar/go-hass-agent/internal/logging"
 	"github.com/joshuar/go-hass-agent/pkg/linux/dbusx"
 )
 
@@ -32,21 +30,6 @@ const (
 )
 
 var ErrNoProblemDetails = errors.New("no details found")
-
-type problemsSensor struct {
-	list map[string]map[string]any
-	linux.Sensor
-}
-
-func (s *problemsSensor) Attributes() map[string]any {
-	attributes := s.Sensor.Attributes()
-
-	if s.list != nil {
-		attributes["problem_list"] = s.list
-	}
-
-	return attributes
-}
 
 func parseProblem(details map[string]string) map[string]any {
 	parsed := make(map[string]any)
@@ -75,92 +58,92 @@ func parseProblem(details map[string]string) map[string]any {
 	return parsed
 }
 
-type worker struct {
+func (w *problemsWorker) newProblemsSensor(problems []string) sensor.Entity {
+	problemDetails := make(map[string]map[string]any)
+	// For each problem, fetch its details.
+	for _, problem := range problems {
+		details, err := w.getProblemDetails(problem)
+		if err != nil {
+			continue
+		}
+
+		problemDetails[problem] = parseProblem(details)
+	}
+
+	return sensor.Entity{
+		Name:       "Problems",
+		StateClass: types.StateClassMeasurement,
+		Units:      "problems",
+		State: &sensor.State{
+			Value: len(problems),
+			ID:    "problems",
+			Icon:  "mdi:alert",
+			Attributes: map[string]any{
+				"data_source":  linux.DataSrcDbus,
+				"problem_list": problemDetails,
+			},
+		},
+	}
+}
+
+type problemsWorker struct {
 	getProblems       func() ([]string, error)
 	getProblemDetails func(problem string) (map[string]string, error)
 	bus               *dbusx.Bus
 }
 
-func (w *worker) Interval() time.Duration { return problemInterval }
+func (w *problemsWorker) UpdateDelta(_ time.Duration) {}
 
-func (w *worker) Jitter() time.Duration { return problemJitter }
-
-func (w *worker) Sensors(ctx context.Context, _ time.Duration) ([]sensor.Details, error) {
-	problemsSensor := &problemsSensor{
-		list: make(map[string]map[string]any),
-		Sensor: linux.Sensor{
-			DisplayName:     "Problems",
-			UniqueID:        "problems",
-			IconString:      "mdi:alert",
-			UnitsString:     "problems",
-			StateClassValue: types.StateClassMeasurement,
-			DataSource:      linux.DataSrcDbus,
-		},
-	}
-
+func (w *problemsWorker) Sensors(_ context.Context) ([]sensor.Entity, error) {
 	// Get the list of problems.
 	problems, err := w.getProblems()
 	if err != nil {
 		return nil, fmt.Errorf("could not retrieve list of problems from D-Bus: %w", err)
 	}
-	// Set the value of the sensor to the total count of problems.
-	problemsSensor.Value = len(problems)
-	// For each problem, fetch its details.
-	for _, problem := range problems {
-		details, err := w.getProblemDetails(problem)
-		if err != nil {
-			logging.FromContext(ctx).
-				With(slog.String("worker", problemsWorkerID)).
-				Debug("Unable to get problem details.",
-					slog.String("problem", problem),
-					slog.Any("error", err))
-		} else {
-			problemsSensor.list[problem] = parseProblem(details)
-		}
-	}
 
-	return []sensor.Details{problemsSensor}, nil
+	return []sensor.Entity{w.newProblemsSensor(problems)}, nil
 }
 
-func NewProblemsWorker(ctx context.Context) (*linux.SensorWorker, error) {
+func NewProblemsWorker(ctx context.Context) (*linux.PollingSensorWorker, error) {
+	worker := linux.NewPollingWorker(problemsWorkerID, problemInterval, problemJitter)
+
 	bus, ok := linux.CtxGetSystemBus(ctx)
 	if !ok {
-		return nil, linux.ErrNoSystemBus
+		return worker, linux.ErrNoSystemBus
 	}
 
 	// Check if we can fetch problem data, bail if we can't.
 	_, err := dbusx.GetData[[]string](bus, dBusProblemsDest, dBusProblemIntr, dBusProblemIntr+".GetProblems")
 	if err != nil {
-		return nil, fmt.Errorf("unable to fetch ABRT problems from D-Bus: %w", err)
+		return worker, fmt.Errorf("unable to fetch ABRT problems from D-Bus: %w", err)
 	}
 
-	return &linux.SensorWorker{
-			Value: &worker{
-				getProblems: func() ([]string, error) {
-					problems, err := dbusx.GetData[[]string](bus, dBusProblemsDest, dBusProblemIntr, dBusProblemIntr+".GetProblems")
-					if err != nil {
-						return nil, fmt.Errorf("error getting data: %w", err)
-					}
+	worker.PollingType = &problemsWorker{
+		bus: bus,
+		getProblems: func() ([]string, error) {
+			problems, err := dbusx.GetData[[]string](bus, dBusProblemsDest, dBusProblemIntr, dBusProblemIntr+".GetProblems")
+			if err != nil {
+				return nil, fmt.Errorf("error getting data: %w", err)
+			}
 
-					return problems, nil
-				},
-				getProblemDetails: func(problem string) (map[string]string, error) {
-					details, err := dbusx.GetData[map[string]string](bus,
-						dBusProblemsDest,
-						dBusProblemIntr,
-						dBusProblemIntr+".GetInfo", problem, []string{"time", "count", "package", "reason"})
-					switch {
-					case details == nil:
-						return nil, ErrNoProblemDetails
-					case err != nil:
-						return nil, err
-					default:
-						return details, nil
-					}
-				},
-				bus: bus,
-			},
-			WorkerID: problemsWorkerID,
+			return problems, nil
 		},
-		nil
+		getProblemDetails: func(problem string) (map[string]string, error) {
+			details, err := dbusx.GetData[map[string]string](bus,
+				dBusProblemsDest,
+				dBusProblemIntr,
+				dBusProblemIntr+".GetInfo", problem, []string{"time", "count", "package", "reason"})
+
+			switch {
+			case details == nil:
+				return nil, ErrNoProblemDetails
+			case err != nil:
+				return nil, err
+			default:
+				return details, nil
+			}
+		},
+	}
+
+	return worker, nil
 }

@@ -30,18 +30,18 @@ const (
 
 var ErrNoApps = errors.New("no running apps")
 
-type worker struct {
-	getAppStates func() (map[string]dbus.Variant, error)
-	activeApp    *activeAppSensor
-	runningApps  *runningAppsSensor
-	triggerCh    chan dbusx.Trigger
+type sensorWorker struct {
+	getAppStates     func() (map[string]dbus.Variant, error)
+	triggerCh        chan dbusx.Trigger
+	runningApp       string
+	totalRunningApps int
 }
 
-func (w *worker) Events(ctx context.Context) (chan sensor.Details, error) {
-	sensorCh := make(chan sensor.Details)
+func (w *sensorWorker) Events(ctx context.Context) (<-chan sensor.Entity, error) {
+	sensorCh := make(chan sensor.Entity)
 	logger := slog.Default().With(slog.String("worker", workerID))
 
-	sendSensors := func(ctx context.Context, sensorCh chan sensor.Details) {
+	sendSensors := func(ctx context.Context, sensorCh chan sensor.Entity) {
 		appSensors, err := w.Sensors(ctx)
 		if err != nil {
 			logger.Debug("Failed to update app sensors.", slog.Any("error", err))
@@ -71,9 +71,9 @@ func (w *worker) Events(ctx context.Context) (chan sensor.Details, error) {
 	return sensorCh, nil
 }
 
-func (w *worker) Sensors(_ context.Context) ([]sensor.Details, error) {
+func (w *sensorWorker) Sensors(_ context.Context) ([]sensor.Entity, error) {
 	var (
-		sensors     []sensor.Details
+		sensors     []sensor.Entity
 		runningApps []string
 	)
 
@@ -93,32 +93,33 @@ func (w *worker) Sensors(_ context.Context) ([]sensor.Details, error) {
 			runningApps = append(runningApps, name)
 		}
 		// If the state is 2 this app is running and the currently active app.
-		if state == 2 && w.activeApp.State() != name {
-			w.activeApp.Value = name
-			sensors = append(sensors, w.activeApp)
+		if state == 2 && w.runningApp != name {
+			w.runningApp = name
+			sensors = append(sensors, newActiveAppSensor(name))
 		}
 	}
 
 	// Update the running apps sensor.
-	if w.runningApps.State() != len(runningApps) {
-		w.runningApps.Value = len(runningApps)
-		w.runningApps.apps = runningApps
-		sensors = append(sensors, w.runningApps)
+	if w.totalRunningApps != len(runningApps) {
+		sensors = append(sensors, newRunningAppsSensor(runningApps))
+		w.totalRunningApps = len(runningApps)
 	}
 
 	return sensors, nil
 }
 
-func NewAppWorker(ctx context.Context) (*linux.SensorWorker, error) {
+func NewAppWorker(ctx context.Context) (*linux.EventSensorWorker, error) {
+	worker := linux.NewEventWorker(workerID)
+
 	// If we cannot find a portal interface, we cannot monitor the active app.
 	portalDest, ok := linux.CtxGetDesktopPortal(ctx)
 	if !ok {
-		return nil, linux.ErrNoDesktopPortal
+		return worker, linux.ErrNoDesktopPortal
 	}
 
 	bus, ok := linux.CtxGetSessionBus(ctx)
 	if !ok {
-		return nil, linux.ErrNoSessionBus
+		return worker, linux.ErrNoSessionBus
 	}
 
 	triggerCh, err := dbusx.NewWatch(
@@ -127,28 +128,24 @@ func NewAppWorker(ctx context.Context) (*linux.SensorWorker, error) {
 		dbusx.MatchMembers("RunningApplicationsChanged"),
 	).Start(ctx, bus)
 	if err != nil {
-		return nil, fmt.Errorf("could not watch D-Bus for app state events: %w", err)
+		return worker, fmt.Errorf("could not watch D-Bus for app state events: %w", err)
 	}
 
-	return &linux.SensorWorker{
-			Value: &worker{
-				getAppStates: func() (map[string]dbus.Variant, error) {
-					apps, err := dbusx.GetData[map[string]dbus.Variant](bus, appStateDBusPath, portalDest, appStateDBusMethod)
-					if err != nil {
-						return nil, fmt.Errorf("could not retrieve app list from D-Bus: %w", err)
-					}
+	worker.EventType = &sensorWorker{
+		triggerCh: triggerCh,
+		getAppStates: func() (map[string]dbus.Variant, error) {
+			apps, err := dbusx.GetData[map[string]dbus.Variant](bus, appStateDBusPath, portalDest, appStateDBusMethod)
+			if err != nil {
+				return nil, fmt.Errorf("could not retrieve app list from D-Bus: %w", err)
+			}
 
-					if apps == nil {
-						return nil, ErrNoApps
-					}
+			if apps == nil {
+				return nil, ErrNoApps
+			}
 
-					return apps, nil
-				},
-				activeApp:   newActiveAppSensor(),
-				runningApps: newRunningAppsSensor(),
-				triggerCh:   triggerCh,
-			},
-			WorkerID: workerID,
+			return apps, nil
 		},
-		nil
+	}
+
+	return worker, nil
 }

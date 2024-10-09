@@ -3,21 +3,30 @@
 // This software is released under the MIT License.
 // https://opensource.org/licenses/MIT
 
-//go:generate stringer -type=rateSensor -output networkRates_generated.go -linecomment
+// Parts of the code for collecting stats was adapted from Prometheus:
+// https://github.com/prometheus/node_exporter//collector/netdev_linux.go
+
+//go:generate go run golang.org/x/tools/cmd/stringer -type=netStatsType -output networkRates_generated.go -linecomment
 //revive:disable:unused-receiver
 package net
 
 import (
 	"context"
 	"fmt"
+	"log/slog"
+	"maps"
+	"slices"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/iancoleman/strcase"
-	"github.com/shirou/gopsutil/v3/net"
+	"github.com/jsimonetti/rtnetlink"
 
 	"github.com/joshuar/go-hass-agent/internal/hass/sensor"
 	"github.com/joshuar/go-hass-agent/internal/hass/sensor/types"
 	"github.com/joshuar/go-hass-agent/internal/linux"
+	"github.com/joshuar/go-hass-agent/internal/logging"
 )
 
 const (
@@ -27,156 +36,345 @@ const (
 	rateInterval = 5 * time.Second
 	rateJitter   = time.Second
 
-	bytesSent     rateSensor = iota // Bytes Sent
-	bytesRecv                       // Bytes Received
-	bytesSentRate                   // Bytes Sent Throughput
-	bytesRecvRate                   // Bytes Received Throughput
+	bytesSent     netStatsType = iota // Bytes Sent
+	bytesRecv                         // Bytes Received
+	bytesSentRate                     // Bytes Sent Throughput
+	bytesRecvRate                     // Bytes Received Throughput
 
-	netRatesWorkerID = "network_rates_sensors"
+	netRatesWorkerID = "network_stats_worker"
+
+	totalsName = "Total"
 )
 
-type rateSensor int
+var (
+	sensorList     = []netStatsType{bytesRecv, bytesSent, bytesRecvRate, bytesSentRate}
+	ignoredDevices = []string{"lo"}
+)
 
-type netIOSensorAttributes struct {
-	Packets    uint64 `json:"packets"`     // number of packets
-	Errors     uint64 `json:"errors"`      // total number of errors
-	Drops      uint64 `json:"drops"`       // total number of packets which were dropped
-	FifoErrors uint64 `json:"fifo_errors"` // total number of FIFO buffers errors
+// linkStats represents a link and its stats.
+type linkStats struct {
+	stats *rtnetlink.LinkStats64
+	name  string
 }
 
-type netIOSensor struct {
-	linux.Sensor
-	sensorType rateSensor
-	netIOSensorAttributes
+type netStatsType int
+
+type netStatsSensor struct {
+	*sensor.Entity
+	previousValue uint64
 }
 
-func (s *netIOSensor) Attributes() map[string]any {
-	attributes := s.Sensor.Attributes()
-	attributes["native_unit_of_measurement"] = s.UnitsString
-	attributes["stats"] = s.netIOSensorAttributes
-
-	return attributes
-}
-
-//nolint:exhaustive
-func (s *netIOSensor) Icon() string {
-	switch s.sensorType {
-	case bytesRecv:
-		return "mdi:download-network"
-	case bytesSent:
-		return "mdi:upload-network"
-	}
-
-	return "mdi:help-network"
-}
-
-//nolint:exhaustive
-func (s *netIOSensor) update(counters *net.IOCountersStat) {
-	switch s.sensorType {
-	case bytesRecv:
-		s.Value = counters.BytesRecv
-		s.Packets = counters.PacketsRecv
-		s.Errors = counters.Errin
-		s.Drops = counters.Dropin
-		s.FifoErrors = counters.Fifoin
-	case bytesSent:
-		s.Value = counters.BytesSent
-		s.Packets = counters.PacketsSent
-		s.Errors = counters.Errout
-		s.Drops = counters.Dropout
-		s.FifoErrors = counters.Fifoout
-	}
-}
-
-func newNetIOSensor(t rateSensor) *netIOSensor {
-	return &netIOSensor{
-		sensorType: t,
-		Sensor: linux.Sensor{
-			DisplayName:      t.String(),
-			UniqueID:         strcase.ToSnake(t.String()),
-			UnitsString:      countUnit,
-			DeviceClassValue: types.DeviceClassDataSize,
-			StateClassValue:  types.StateClassMeasurement,
-			DataSource:       linux.DataSrcProcfs,
-		},
-	}
-}
-
-type netIORateSensor struct {
-	linux.Sensor
-	sensorType rateSensor
-	lastValue  uint64
-}
-
-//nolint:exhaustive
-func (s *netIORateSensor) Icon() string {
-	switch s.sensorType {
-	case bytesRecvRate:
-		return "mdi:transfer-down"
-	case bytesSentRate:
-		return "mdi:transfer-up"
-	}
-
-	return "mdi:help-network"
-}
-
-func (s *netIORateSensor) update(d time.Duration, currentValue uint64) {
-	if uint64(d.Seconds()) > 0 && s.lastValue != 0 {
-		s.Value = (currentValue - s.lastValue) / uint64(d.Seconds())
-	} else {
-		s.Value = 0
-	}
-
-	s.lastValue = currentValue
-}
-
-func newNetIORateSensor(t rateSensor) *netIORateSensor {
-	return &netIORateSensor{
-		sensorType: t,
-		Sensor: linux.Sensor{
-			DisplayName:      t.String(),
-			UniqueID:         strcase.ToSnake(t.String()),
-			UnitsString:      rateUnit,
-			DeviceClassValue: types.DeviceClassDataRate,
-			StateClassValue:  types.StateClassMeasurement,
-			DataSource:       linux.DataSrcProcfs,
-		},
-	}
-}
-
-type ratesWorker struct {
-	bytesRx, bytesTx         *netIOSensor
-	bytesRxRate, bytesTxRate *netIORateSensor
-}
-
-func (w *ratesWorker) Interval() time.Duration { return rateInterval }
-
-func (w *ratesWorker) Jitter() time.Duration { return rateJitter }
-
-func (w *ratesWorker) Sensors(ctx context.Context, duration time.Duration) ([]sensor.Details, error) {
-	// Retrieve new stats.
-	netIO, err := net.IOCountersWithContext(ctx, false)
-	if err != nil {
-		return nil, fmt.Errorf("problem fetching network stats: %w", err)
-	}
-	// Update all sensors.
-	w.bytesRx.update(&netIO[0])
-	w.bytesTx.update(&netIO[0])
-	w.bytesRxRate.update(duration, netIO[0].BytesRecv)
-	w.bytesTxRate.update(duration, netIO[0].BytesSent)
-	// Return sensors with new values.
-	return []sensor.Details{w.bytesRx, w.bytesTx, w.bytesRxRate, w.bytesTxRate}, nil
-}
-
-func NewRatesWorker(_ context.Context) (*linux.SensorWorker, error) {
-	return &linux.SensorWorker{
-			Value: &ratesWorker{
-				bytesRx:     newNetIOSensor(bytesRecv),
-				bytesTx:     newNetIOSensor(bytesSent),
-				bytesRxRate: newNetIORateSensor(bytesRecvRate),
-				bytesTxRate: newNetIORateSensor(bytesSentRate),
+// newNetStatsSensor creates a new network stats sensor.
+func newNetStatsSensor(name string, sensorType netStatsType, stats *rtnetlink.LinkStats64) *netStatsSensor {
+	netSensor := &netStatsSensor{
+		Entity: &sensor.Entity{
+			Name: name + " " + sensorType.String(),
+			State: &sensor.State{
+				ID: strings.ToLower(name) + "_" + strcase.ToSnake(sensorType.String()),
+				Attributes: map[string]any{
+					"data_source": linux.DataSrcNetlink,
+				},
 			},
-			WorkerID: netRatesWorkerID,
 		},
-		nil
+	}
+
+	// Set device sensors to category diagnostic.
+	if name != totalsName {
+		netSensor.Entity.Category = types.CategoryDiagnostic
+	}
+
+	// Set type-specific values.
+	switch sensorType {
+	case bytesRecv:
+		netSensor.Icon = "mdi:download-network"
+		netSensor.Units = countUnit
+		netSensor.DeviceClass = types.SensorDeviceClassDataSize
+		netSensor.StateClass = types.StateClassMeasurement
+	case bytesSent:
+		netSensor.Icon = "mdi:upload-network"
+		netSensor.Units = countUnit
+		netSensor.DeviceClass = types.SensorDeviceClassDataSize
+		netSensor.StateClass = types.StateClassMeasurement
+	case bytesRecvRate:
+		netSensor.Icon = "mdi:transfer-down"
+		netSensor.Units = rateUnit
+		netSensor.DeviceClass = types.SensorDeviceClassDataRate
+		netSensor.StateClass = types.StateClassMeasurement
+	case bytesSentRate:
+		netSensor.Icon = "mdi:transfer-up"
+		netSensor.Units = rateUnit
+		netSensor.DeviceClass = types.SensorDeviceClassDataRate
+		netSensor.StateClass = types.StateClassMeasurement
+	}
+
+	// Set current value.
+	netSensor.update(name, sensorType, stats, 0)
+
+	return netSensor
+}
+
+// update will update the value for a sensor. For count sensors, the value is
+// updated directly based on the new stats. For rates sensors, the new rate is
+// calculated and the previous value saved.
+func (s *netStatsSensor) update(link string, sensorType netStatsType, stats *rtnetlink.LinkStats64, delta time.Duration) {
+	if stats == nil {
+		return
+	}
+
+	switch sensorType {
+	case bytesRecv:
+		s.Value = stats.RXBytes
+		if link != totalsName {
+			maps.Copy(s.Attributes, getRXAttributes(stats))
+		}
+	case bytesSent:
+		s.Value = stats.TXBytes
+		if link != totalsName {
+			maps.Copy(s.Attributes, getTXAttributes(stats))
+		}
+	case bytesRecvRate:
+		rate := calculateRate(stats.RXBytes, s.previousValue, delta)
+		s.Value = rate
+		s.previousValue = stats.RXBytes
+	case bytesSentRate:
+		rate := calculateRate(stats.TXBytes, s.previousValue, delta)
+		s.Value = rate
+		s.previousValue = stats.TXBytes
+	}
+}
+
+// calculate rate calculates a sensor value as a rate based on the
+// current/previous values and a delta (time since last measurement).
+func calculateRate(currentValue, previousValue uint64, delta time.Duration) uint64 {
+	if uint64(delta.Seconds()) > 0 && previousValue != 0 {
+		return (currentValue - previousValue) / uint64(delta.Seconds())
+	}
+
+	return 0
+}
+
+// getRXAttributes returns all sundry receive stats which can be added to a
+// sensor as extra attributes.
+func getRXAttributes(stats *rtnetlink.LinkStats64) map[string]any {
+	return map[string]any{
+		"receive_packets":       stats.RXPackets,
+		"receive_errors":        stats.RXErrors,
+		"receive_dropped":       stats.RXDropped,
+		"multicast":             stats.Multicast,
+		"collisions":            stats.Collisions,
+		"receive_length_errors": stats.RXLengthErrors,
+		"receive_over_errors":   stats.RXOverErrors,
+		"receive_crc_errors":    stats.RXCRCErrors,
+		"receive_frame_errors":  stats.RXFrameErrors,
+		"receive_fifo_errors":   stats.RXFIFOErrors,
+		"receive_missed_errors": stats.RXMissedErrors,
+		"receive_compressed":    stats.RXCompressed,
+		"transmit_compressed":   stats.TXCompressed,
+		"receive_nohandler":     stats.RXNoHandler,
+	}
+}
+
+// getTXAttributes returns all sundry transmit stats which can be added to a
+// sensor as extra attributes.
+func getTXAttributes(stats *rtnetlink.LinkStats64) map[string]any {
+	return map[string]any{
+		"transmit_packets":          stats.TXPackets,
+		"transmit_errors":           stats.TXErrors,
+		"transmit_dropped":          stats.TXDropped,
+		"multicast":                 stats.Multicast,
+		"collisions":                stats.Collisions,
+		"transmit_aborted_errors":   stats.TXAbortedErrors,
+		"transmit_carrier_errors":   stats.TXCarrierErrors,
+		"transmit_fifo_errors":      stats.TXFIFOErrors,
+		"transmit_heartbeat_errors": stats.TXHeartbeatErrors,
+		"transmit_window_errors":    stats.TXWindowErrors,
+		"transmit_compressed":       stats.TXCompressed,
+	}
+}
+
+// netStatsWorker is the object used for tracking network stats sensors. It
+// holds a netlink connection and a map of links with their stats sensors.
+type netStatsWorker struct {
+	statsSensors map[string]map[netStatsType]*netStatsSensor
+	nlconn       *rtnetlink.Conn
+	delta        time.Duration
+	mu           sync.Mutex
+}
+
+// updateTotals takes the total Rx/Tx bytes and updates the total sensors.
+func (w *netStatsWorker) updateTotals(totalBytesRx, totalBytesTx uint64) {
+	stats := &rtnetlink.LinkStats64{
+		RXBytes: totalBytesRx,
+		TXBytes: totalBytesTx,
+	}
+	for _, sensorType := range sensorList {
+		w.statsSensors[totalsName][sensorType].update(totalsName, sensorType, stats, w.delta)
+	}
+}
+
+func (w *netStatsWorker) UpdateDelta(delta time.Duration) {
+	w.delta = delta
+}
+
+func (w *netStatsWorker) Sensors(_ context.Context) ([]sensor.Entity, error) {
+	// Get all links.
+	links, err := w.getLinks()
+	if err != nil {
+		return nil, fmt.Errorf("error accessing netlink: %w", err)
+	}
+
+	// Get link stats, filtering "uninteresting" links.
+	stats := w.getLinkStats(links)
+	sensors := make([]sensor.Entity, 0, len(stats)*4+4)
+
+	w.mu.Lock()
+
+	// Counters for totals.
+	var totalBytesRx, totalBytesTx uint64
+
+	// For each link, update the link sensors with the new stats.
+	for _, link := range stats {
+		name := link.name
+		stats := link.stats
+		totalBytesRx += stats.RXBytes
+		totalBytesTx += stats.RXBytes
+
+		if _, ok := w.statsSensors[name]; ok { // Existing link/sensors, update.
+			for sensorType := range w.statsSensors[name] {
+				w.statsSensors[name][sensorType].update(name, sensorType, stats, w.delta)
+			}
+		} else { // New link, add to tracking map.
+			w.statsSensors[name] = generateSensors(name, stats)
+		}
+		// Create a list of sensors.
+		for _, s := range w.statsSensors[name] {
+			sensors = append(sensors, *s.Entity)
+		}
+	}
+
+	// Update the totals sensors based on the counters.
+	w.updateTotals(totalBytesRx, totalBytesTx)
+	// Append the total sensors to the list of sensors.
+	for _, s := range w.statsSensors[totalsName] {
+		sensors = append(sensors, *s.Entity)
+	}
+
+	w.mu.Unlock()
+
+	return sensors, nil
+}
+
+// NewNetStatsWorker sets up a sensor worker that tracks network stats.
+func NewNetStatsWorker(ctx context.Context) (*linux.PollingSensorWorker, error) {
+	worker := linux.NewPollingWorker(netRatesWorkerID, rateInterval, rateJitter)
+
+	conn, err := rtnetlink.Dial(nil)
+	if err != nil {
+		return worker, fmt.Errorf("could not connect to netlink: %w", err)
+	}
+
+	go func() {
+		<-ctx.Done()
+
+		if err := conn.Close(); err != nil {
+			logging.FromContext(ctx).Debug("Could not close netlink connection.",
+				slog.String("worker", netRatesWorkerID),
+				slog.Any("error", err))
+		}
+	}()
+
+	ratesWorker := &netStatsWorker{
+		statsSensors: make(map[string]map[netStatsType]*netStatsSensor),
+		nlconn:       conn,
+	}
+	ratesWorker.statsSensors[totalsName] = generateSensors(totalsName, nil)
+
+	worker.PollingType = ratesWorker
+
+	return worker, nil
+}
+
+// getLinks returns all available links on this device. If a problem occurred, a
+// non-nil error is returned.
+func (w *netStatsWorker) getLinks() ([]rtnetlink.LinkMessage, error) {
+	links, err := w.nlconn.Link.List()
+	if err != nil {
+		return nil, fmt.Errorf("could not retrieve list of devices from netlink: %w", err)
+	}
+
+	return links, nil
+}
+
+// getLinkStats collates the network stats for all links. It filters
+// links to those with stats, not in an exclusion list and currently active.
+func (w *netStatsWorker) getLinkStats(links []rtnetlink.LinkMessage) []linkStats {
+	allLinkStats := make([]linkStats, 0, len(links))
+
+	for _, msg := range links {
+		if msg.Attributes == nil {
+			continue
+		}
+
+		// Skip ignored devices.
+		if slices.Contains(ignoredDevices, msg.Attributes.Name) {
+			continue
+		}
+
+		// Ignore devices that are not currently active.
+		if *msg.Attributes.Carrier == 0 {
+			continue
+		}
+
+		name := msg.Attributes.Name
+		stats := msg.Attributes.Stats64
+
+		if stats32 := msg.Attributes.Stats; stats == nil && stats32 != nil {
+			stats = &rtnetlink.LinkStats64{
+				RXPackets:          uint64(stats32.RXPackets),
+				TXPackets:          uint64(stats32.TXPackets),
+				RXBytes:            uint64(stats32.RXBytes),
+				TXBytes:            uint64(stats32.TXBytes),
+				RXErrors:           uint64(stats32.RXErrors),
+				TXErrors:           uint64(stats32.TXErrors),
+				RXDropped:          uint64(stats32.RXDropped),
+				TXDropped:          uint64(stats32.TXDropped),
+				Multicast:          uint64(stats32.Multicast),
+				Collisions:         uint64(stats32.Collisions),
+				RXLengthErrors:     uint64(stats32.RXLengthErrors),
+				RXOverErrors:       uint64(stats32.RXOverErrors),
+				RXCRCErrors:        uint64(stats32.RXCRCErrors),
+				RXFrameErrors:      uint64(stats32.RXFrameErrors),
+				RXFIFOErrors:       uint64(stats32.RXFIFOErrors),
+				RXMissedErrors:     uint64(stats32.RXMissedErrors),
+				TXAbortedErrors:    uint64(stats32.TXAbortedErrors),
+				TXCarrierErrors:    uint64(stats32.TXCarrierErrors),
+				TXFIFOErrors:       uint64(stats32.TXFIFOErrors),
+				TXHeartbeatErrors:  uint64(stats32.TXHeartbeatErrors),
+				TXWindowErrors:     uint64(stats32.TXWindowErrors),
+				RXCompressed:       uint64(stats32.RXCompressed),
+				TXCompressed:       uint64(stats32.TXCompressed),
+				RXNoHandler:        uint64(stats32.RXNoHandler),
+				RXOtherhostDropped: 0,
+			}
+		}
+
+		if stats != nil {
+			allLinkStats = append(allLinkStats, linkStats{
+				name:  name,
+				stats: stats,
+			})
+		}
+	}
+
+	return allLinkStats
+}
+
+// generateSensors creates a map of sensors for the given link.
+func generateSensors(name string, stats *rtnetlink.LinkStats64) map[netStatsType]*netStatsSensor {
+	sensors := make(map[netStatsType]*netStatsSensor, 4)
+	for _, sensorType := range sensorList {
+		sensors[sensorType] = newNetStatsSensor(name, sensorType, stats)
+	}
+
+	return sensors
 }

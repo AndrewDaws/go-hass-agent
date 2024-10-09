@@ -12,6 +12,7 @@ import (
 	"log/slog"
 
 	"github.com/joshuar/go-hass-agent/internal/hass/sensor"
+	"github.com/joshuar/go-hass-agent/internal/hass/sensor/types"
 	"github.com/joshuar/go-hass-agent/internal/linux"
 	"github.com/joshuar/go-hass-agent/pkg/linux/dbusx"
 )
@@ -24,41 +25,49 @@ const (
 	screenLockUnknownIcon = "mdi:lock-alert"
 )
 
-type screenlockSensor struct {
-	linux.Sensor
+func newScreenlockSensor(value bool) sensor.Entity {
+	return sensor.Entity{
+		Name:        "Screen Lock",
+		DeviceClass: types.BinarySensorDeviceClassLock,
+		State: &sensor.State{
+			ID:         "screen_lock",
+			Icon:       screenLockIcon(value),
+			EntityType: types.BinarySensor,
+			Value:      !value, // For device class BinarySensorDeviceClassLock: On means open (unlocked), Off means closed (locked).
+			Attributes: map[string]any{
+				"data_source": linux.DataSrcDbus,
+			},
+		},
+	}
 }
 
-func (s *screenlockSensor) Icon() string {
-	isLocked, ok := s.Value.(bool)
-
-	switch {
-	case !ok:
-		return screenLockUnknownIcon
-	case isLocked:
+func screenLockIcon(value bool) string {
+	switch value {
+	case true:
 		return screenLockedIcon
 	default:
 		return screenUnlockedIcon
 	}
 }
 
-func newScreenlockEvent(value bool) *screenlockSensor {
-	return &screenlockSensor{
-		Sensor: linux.Sensor{
-			DisplayName: "Screen Lock",
-			UniqueID:    "screen_lock",
-			IsBinary:    true,
-			DataSource:  linux.DataSrcDbus,
-			Value:       value,
-		},
-	}
-}
-
 type screenLockWorker struct {
-	triggerCh chan dbusx.Trigger
+	triggerCh      chan dbusx.Trigger
+	screenLockProp *dbusx.Property[bool]
 }
 
-func (w *screenLockWorker) Events(ctx context.Context) (chan sensor.Details, error) {
-	sensorCh := make(chan sensor.Details)
+//nolint:gocognit
+func (w *screenLockWorker) Events(ctx context.Context) (<-chan sensor.Entity, error) {
+	sensorCh := make(chan sensor.Entity)
+
+	currentState, err := w.getCurrentState()
+	if err != nil {
+		close(sensorCh)
+		return sensorCh, fmt.Errorf("cannot process screen lock events: %w", err)
+	}
+
+	go func() {
+		sensorCh <- currentState
+	}()
 
 	go func() {
 		defer close(sensorCh)
@@ -75,13 +84,13 @@ func (w *screenLockWorker) Events(ctx context.Context) (chan sensor.Details, err
 						slog.With(slog.String("worker", screenLockWorkerID)).Debug("Could not parse received D-Bus signal.", slog.Any("error", err))
 					} else {
 						if changed {
-							sensorCh <- newScreenlockEvent(lockState)
+							sensorCh <- newScreenlockSensor(lockState)
 						}
 					}
 				case sessionLockSignal:
-					sensorCh <- newScreenlockEvent(true)
+					sensorCh <- newScreenlockSensor(true)
 				case sessionUnlockSignal:
-					sensorCh <- newScreenlockEvent(false)
+					sensorCh <- newScreenlockSensor(false)
 				}
 			}
 		}
@@ -90,20 +99,35 @@ func (w *screenLockWorker) Events(ctx context.Context) (chan sensor.Details, err
 	return sensorCh, nil
 }
 
-// ?: retrieve the current screen lock state when called.
-func (w *screenLockWorker) Sensors(_ context.Context) ([]sensor.Details, error) {
-	return nil, linux.ErrUnimplemented
+func (w *screenLockWorker) Sensors(_ context.Context) ([]sensor.Entity, error) {
+	currentState, err := w.getCurrentState()
+	if err != nil {
+		return nil, fmt.Errorf("cannot generate screen lock sensor: %w", err)
+	}
+
+	return []sensor.Entity{currentState}, nil
 }
 
-func NewScreenLockWorker(ctx context.Context) (*linux.SensorWorker, error) {
+func (w *screenLockWorker) getCurrentState() (sensor.Entity, error) {
+	screenLockState, err := w.screenLockProp.Get()
+	if err != nil {
+		return sensor.Entity{}, fmt.Errorf("could not fetch screen lock state: %w", err)
+	}
+
+	return newScreenlockSensor(screenLockState), nil
+}
+
+func NewScreenLockWorker(ctx context.Context) (*linux.EventSensorWorker, error) {
+	worker := linux.NewEventWorker(screenLockWorkerID)
+
 	bus, ok := linux.CtxGetSystemBus(ctx)
 	if !ok {
-		return nil, linux.ErrNoSystemBus
+		return worker, linux.ErrNoSystemBus
 	}
 
 	sessionPath, ok := linux.CtxGetSessionPath(ctx)
 	if !ok {
-		return nil, linux.ErrNoSessionPath
+		return worker, linux.ErrNoSessionPath
 	}
 
 	triggerCh, err := dbusx.NewWatch(
@@ -111,14 +135,13 @@ func NewScreenLockWorker(ctx context.Context) (*linux.SensorWorker, error) {
 		dbusx.MatchMembers(sessionLockSignal, sessionUnlockSignal, sessionLockedProp, "PropertiesChanged"),
 	).Start(ctx, bus)
 	if err != nil {
-		return nil, fmt.Errorf("unable to create D-Bus watch for screen lock state: %w", err)
+		return worker, fmt.Errorf("unable to create D-Bus watch for screen lock state: %w", err)
 	}
 
-	return &linux.SensorWorker{
-			Value: &screenLockWorker{
-				triggerCh: triggerCh,
-			},
-			WorkerID: screenLockWorkerID,
-		},
-		nil
+	worker.EventType = &screenLockWorker{
+		triggerCh:      triggerCh,
+		screenLockProp: dbusx.NewProperty[bool](bus, sessionPath, loginBaseInterface, sessionInterface+"."+sessionLockedProp),
+	}
+
+	return worker, nil
 }

@@ -12,7 +12,7 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/joshuar/go-hass-agent/internal/device"
+	"github.com/joshuar/go-hass-agent/internal/hass"
 	"github.com/joshuar/go-hass-agent/internal/hass/sensor"
 	"github.com/joshuar/go-hass-agent/internal/linux"
 	"github.com/joshuar/go-hass-agent/internal/logging"
@@ -37,15 +37,7 @@ const (
 	workerID = "location_sensor"
 )
 
-type locationSensor struct {
-	linux.Sensor
-}
-
-func (s *locationSensor) Name() string { return "Location" }
-
-func (s *locationSensor) ID() string { return "location" }
-
-type worker struct {
+type locationWorker struct {
 	getLocationProperty func(path, prop string) (float64, error)
 	stopMethod          *dbusx.Method
 	startMethod         *dbusx.Method
@@ -53,7 +45,7 @@ type worker struct {
 }
 
 //nolint:gocognit
-func (w *worker) Events(ctx context.Context) (chan sensor.Details, error) {
+func (w *locationWorker) Events(ctx context.Context) (<-chan sensor.Entity, error) {
 	logger := logging.FromContext(ctx).With(slog.String("worker", workerID))
 
 	err := w.startMethod.Call(ctx)
@@ -61,7 +53,7 @@ func (w *worker) Events(ctx context.Context) (chan sensor.Details, error) {
 		return nil, fmt.Errorf("could not start geoclue client: %w", err)
 	}
 
-	sensorCh := make(chan sensor.Details)
+	sensorCh := make(chan sensor.Entity)
 
 	go func() {
 		logger.Debug("Monitoring for location updates.")
@@ -94,11 +86,11 @@ func (w *worker) Events(ctx context.Context) (chan sensor.Details, error) {
 	return sensorCh, nil
 }
 
-func (w *worker) Sensors(_ context.Context) ([]sensor.Details, error) {
+func (w *locationWorker) Sensors(_ context.Context) ([]sensor.Entity, error) {
 	return nil, linux.ErrUnimplemented
 }
 
-func (w *worker) newLocation(locationPath string) (*locationSensor, error) {
+func (w *locationWorker) newLocation(locationPath string) (sensor.Entity, error) {
 	var warnings error
 
 	latitude, err := w.getLocationProperty(locationPath, "Latitude")
@@ -112,9 +104,9 @@ func (w *worker) newLocation(locationPath string) (*locationSensor, error) {
 	accuracy, err := w.getLocationProperty(locationPath, "Accuracy")
 	warnings = errors.Join(warnings, err)
 
-	location := &locationSensor{
-		Sensor: linux.Sensor{
-			Value: &sensor.LocationRequest{
+	location := sensor.Entity{
+		State: &sensor.State{
+			Value: &hass.LocationRequest{
 				Gps:         []float64{latitude, longitude},
 				GpsAccuracy: int(accuracy),
 				Speed:       int(speed),
@@ -126,22 +118,18 @@ func (w *worker) newLocation(locationPath string) (*locationSensor, error) {
 	return location, warnings
 }
 
-func NewLocationWorker(ctx context.Context) (*linux.SensorWorker, error) {
-	// Don't run this worker if we are not running on a laptop.
-	chassis, _ := device.Chassis() //nolint:errcheck // error is same as any value other than wanted value.
-	if chassis != "laptop" {
-		return nil, fmt.Errorf("unable to monitor location updates: %w", device.ErrUnsupportedHardware)
-	}
+func NewLocationWorker(ctx context.Context) (*linux.EventSensorWorker, error) {
+	worker := linux.NewEventWorker(workerID)
 
 	bus, ok := linux.CtxGetSystemBus(ctx)
 	if !ok {
-		return nil, linux.ErrNoSystemBus
+		return worker, linux.ErrNoSystemBus
 	}
 
 	// Create a GeoClue client.
 	clientPath, err := createClient(bus)
 	if err != nil {
-		return nil, fmt.Errorf("unable to create geoclue client: %w", err)
+		return worker, fmt.Errorf("unable to create geoclue client: %w", err)
 	}
 
 	// Set threshold values.
@@ -152,11 +140,12 @@ func NewLocationWorker(ctx context.Context) (*linux.SensorWorker, error) {
 		dbusx.MatchInterface(clientInterface),
 		dbusx.MatchMembers("LocationUpdated")).Start(ctx, bus)
 	if err != nil {
-		return nil, fmt.Errorf("could not setup D-Bus watch for location updates: %w", err)
+		return worker, fmt.Errorf("could not setup D-Bus watch for location updates: %w", err)
 	}
 
 	// Create our sensor worker.
-	worker := &worker{
+	worker.EventType = &locationWorker{
+		triggerCh: triggerCh,
 		getLocationProperty: func(path, prop string) (float64, error) {
 			value, err := dbusx.NewProperty[float64](bus, path, geoclueInterface, locationInterface+"."+prop).Get()
 			if err != nil {
@@ -165,12 +154,11 @@ func NewLocationWorker(ctx context.Context) (*linux.SensorWorker, error) {
 
 			return value, nil
 		},
-		stopMethod:  dbusx.NewMethod(bus, geoclueInterface, clientPath, stopCall),
 		startMethod: dbusx.NewMethod(bus, geoclueInterface, clientPath, startCall),
-		triggerCh:   triggerCh,
+		stopMethod:  dbusx.NewMethod(bus, geoclueInterface, clientPath, stopCall),
 	}
 
-	return &linux.SensorWorker{Value: worker, WorkerID: workerID}, nil
+	return worker, nil
 }
 
 func createClient(bus *dbusx.Bus) (string, error) {

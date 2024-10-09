@@ -8,27 +8,31 @@ package sensor
 
 import (
 	"reflect"
-	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 )
 
 func TestTracker_Get(t *testing.T) {
-	sensor, _, _ := newMockDetails(t)
+	mockEntity := &Entity{
+		Name: "Mock Entity",
+		State: &State{
+			ID: "mock_entity",
+		},
+	}
 
-	mockSensorMap := map[string]Details{
-		sensor.ID(): sensor,
+	mockSensorMap := map[string]*Entity{
+		mockEntity.ID: mockEntity,
 	}
 
 	type fields struct {
-		sensor map[string]Details
+		sensor map[string]*Entity
 	}
 	type args struct {
 		id string
 	}
 	tests := []struct {
-		want    Details
+		want    *Entity
 		fields  fields
 		name    string
 		args    args
@@ -37,9 +41,9 @@ func TestTracker_Get(t *testing.T) {
 		{
 			name:    "successful get",
 			fields:  fields{sensor: mockSensorMap},
-			args:    args{id: sensor.ID()},
+			args:    args{id: "mock_entity"},
 			wantErr: false,
-			want:    sensor,
+			want:    mockEntity,
 		},
 		{
 			name:    "unsuccessful get",
@@ -66,14 +70,19 @@ func TestTracker_Get(t *testing.T) {
 }
 
 func TestTracker_SensorList(t *testing.T) {
-	sensor, _, _ := newMockDetails(t)
+	mockEntity := &Entity{
+		Name: "Mock Entity",
+		State: &State{
+			ID: "mock_entity",
+		},
+	}
 
-	mockSensorMap := map[string]Details{
-		sensor.ID(): sensor,
+	mockSensorMap := map[string]*Entity{
+		mockEntity.ID: mockEntity,
 	}
 
 	type fields struct {
-		sensor map[string]Details
+		sensor map[string]*Entity
 	}
 	tests := []struct {
 		name   string
@@ -83,7 +92,7 @@ func TestTracker_SensorList(t *testing.T) {
 		{
 			name:   "with sensors",
 			fields: fields{sensor: mockSensorMap},
-			want:   []string{sensor.ID()},
+			want:   []string{"mock_entity"},
 		},
 		{
 			name: "without sensors",
@@ -103,17 +112,29 @@ func TestTracker_SensorList(t *testing.T) {
 }
 
 func TestTracker_Add(t *testing.T) {
-	sensor, _, _ := newMockDetails(t)
+	newEntity := &Entity{
+		Name: "New Entity",
+		State: &State{
+			ID: "new_entity",
+		},
+	}
 
-	mockSensorMap := map[string]Details{
-		sensor.ID(): sensor,
+	existingEntity := &Entity{
+		Name: "Existing Entity",
+		State: &State{
+			ID: "existing_entity",
+		},
+	}
+
+	mockSensorMap := map[string]*Entity{
+		existingEntity.ID: existingEntity,
 	}
 
 	type fields struct {
-		sensor map[string]Details
+		sensor map[string]*Entity
 	}
 	type args struct {
-		sensor Details
+		sensor *Entity
 	}
 	tests := []struct {
 		args    args
@@ -124,16 +145,16 @@ func TestTracker_Add(t *testing.T) {
 		{
 			name:   "new sensor",
 			fields: fields{sensor: mockSensorMap},
-			args:   args{sensor: sensor},
+			args:   args{sensor: newEntity},
 		},
 		{
 			name:   "existing sensor",
 			fields: fields{sensor: mockSensorMap},
-			args:   args{sensor: sensor},
+			args:   args{sensor: existingEntity},
 		},
 		{
 			name:    "invalid tracker",
-			args:    args{sensor: sensor},
+			args:    args{sensor: newEntity},
 			wantErr: true,
 		},
 	}
@@ -150,14 +171,19 @@ func TestTracker_Add(t *testing.T) {
 }
 
 func TestTracker_Reset(t *testing.T) {
-	sensor, _, _ := newMockDetails(t)
+	mockEntity := &Entity{
+		Name: "Mock Entity",
+		State: &State{
+			ID: "mock_entity",
+		},
+	}
 
-	mockSensorMap := map[string]Details{
-		sensor.ID(): sensor,
+	mockSensorMap := map[string]*Entity{
+		mockEntity.ID: mockEntity,
 	}
 
 	type fields struct {
-		sensor map[string]Details
+		sensor map[string]*Entity
 	}
 	tests := []struct {
 		fields fields
@@ -175,34 +201,6 @@ func TestTracker_Reset(t *testing.T) {
 			}
 			tr.Reset()
 			assert.Nil(t, tr.sensor)
-		})
-	}
-}
-
-func TestNewTracker(t *testing.T) {
-	tests := []struct {
-		want    *Tracker
-		name    string
-		wantErr bool
-	}{
-		{
-			name: "new tracker",
-			want: &Tracker{
-				sensor: make(map[string]Details),
-				mu:     sync.Mutex{},
-			},
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := NewTracker()
-			if (err != nil) != tt.wantErr {
-				t.Errorf("NewTracker() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("NewTracker() = %v, want %v", got, tt.want)
-			}
 		})
 	}
 }

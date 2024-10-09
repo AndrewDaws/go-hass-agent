@@ -56,6 +56,7 @@
   - [🤔 Use-cases](#-use-cases)
   - [📈/🕹️ List of Sensors/Controls (by Operating System)](#️-list-of-sensorscontrols-by-operating-system)
     - [🐧 Linux](#-linux)
+    - [All Operating Systems](#all-operating-systems)
   - [🗒️ Versioning](#️-versioning)
 - [🧰 Getting Started](#-getting-started)
   - [🤝 Compatibility](#-compatibility)
@@ -68,7 +69,7 @@
   - [🐳 Running in a container](#-running-in-a-container)
   - [♻️ Regular Usage](#️-regular-usage)
   - [📌 Configuration Location](#-configuration-location)
-  - [Script Sensors](#script-sensors)
+  - [🐚 Script Sensors](#-script-sensors)
     - [Requirements](#requirements)
     - [Supported Scripting Languages](#supported-scripting-languages)
     - [Output Format](#output-format)
@@ -78,7 +79,7 @@
         - [TOML](#toml)
     - [Schedule](#schedule)
     - [Security Implications](#security-implications)
-  - [MQTT Sensors and Controls](#mqtt-sensors-and-controls)
+  - [🚌 MQTT Sensors and Controls](#-mqtt-sensors-and-controls)
     - [Configuration](#configuration)
     - [Custom D-Bus Controls](#custom-d-bus-controls)
     - [Other Custom Commands](#other-custom-commands)
@@ -128,12 +129,12 @@ like the companion app or any other "thing" you've added into Home Assistant.
   - By default, Go Hass Agent ships with up around 100 sensors (on Linux),
     depending on the system it runs on.
 - **Custom Sensors via Scripts:** All platforms can also utilise scripts/executables to
-create custom sensors. See [Script Sensors](#script-sensors).
+create custom sensors. See [Script Sensors](#-script-sensors).
 - **Controls and additional sensors via MQTT:** Where Home Assistant is
 connected to MQTT, Go Hass Agent can add some additional sensors/controls for
 various system features. A selection of device controls are provided by default,
 and you can configure additional controls to execute D-Bus commands or
-scripts/executables. See [Control via MQTT](#mqtt-sensors-and-controls).
+scripts/executables. See [Control via MQTT](#-mqtt-sensors-and-controls).
 
 [⬆️ Back to Top](#-table-of-contents)
 
@@ -170,120 +171,142 @@ this app:
 
 #### 🐧 Linux
 
-- *Go Hass Agent Version*. Updated on agent start.
 - App Details:
-  - *Active App* (currently active (focused) application) and *Running Apps*
+  - **Active App** (currently active (focused) application) and **Running Apps**
   (count of all running applications). Updated when active app or number of apps
   changes.
   - Via D-Bus (requires [XDG Desktop Portal
   Support](https://flatpak.github.io/xdg-desktop-portal/docs/) support).
 - Desktop Settings:
-  - *Accent Colour* (the hex code representing the accent colour of the desktop
-  environment in use) and *Theme Type* (whether a dark or light desktop theme is
+  - **Accent Colour** (the hex code representing the accent colour of the desktop
+  environment in use) and **Theme Type** (whether a dark or light desktop theme is
   detected). Updated when theme or colour changes.
   - Via D-Bus (requires [XDG Desktop Portal
   Support](https://flatpak.github.io/xdg-desktop-portal/docs/) support).
-- Media Controls (when [configured with MQTT](#mqtt-sensors-and-controls)):
-  - *Volume Control* Adjust the volume on the default audio output device.
-  - *Volume Mute* Mute/Unmute the default audio output device.
-  - *MPRIS Player State* Show the current state of any MPRIS compatible player.
+- Media Controls (when [configured with MQTT](#-mqtt-sensors-and-controls)):
+  - **Volume Control** Adjust the volume on the default audio output device.
+  - **Volume Mute** Mute/Unmute the default audio output device.
+  - **MPRIS Player State** Show the current state of any MPRIS compatible player.
     - Requires a player with MPRIS support.
-  - *Webcam Control* Start/stop a webcam and view the video in Home Assistant.
+  - **Webcam Control** Start/stop a webcam and view the video in Home Assistant.
     - Requires a webcam that is exposed via V4L2 (VideoForLinux2).
 - Connected Battery Details:
-  - *Battery Type* (the type of battery, e.g., UPS, line power). Updated on battery add/remove.
-  - *Battery Temp* (battery temperature). Updated when the temperature changes.
-  - *Battery Power* (the battery current power draw, in W). Attributes: Voltage
+  - **Battery Type** (the type of battery, e.g., UPS, line power). Updated on battery add/remove.
+  - **Battery Temp** (battery temperature). Updated when the temperature changes.
+  - **Battery Power** (the battery current power draw, in W). Attributes: Voltage
     (V), Energy consumption (kWh). Updated when power draw changes.
-  - *Battery Level/Percentage* (either a textual representation of the level or
+  - **Battery Level/Percentage** (either a textual representation of the level or
     a percentage, depending on battery support). Updated when level changes.
-  - *Battery State* (the current battery state, e.g., charging/discharging).
+  - **Battery State** (the current battery state, e.g., charging/discharging).
     Updated When state changes.
   - All battery sensors require D-Bus and
     [Upower](https://upower.freedesktop.org/) support.
 - Memory Stats:
-  - *Memory Total* (total memory on the system, in B).
-  - *Memory Available* (current memory available/free, in B).
-  - *Memory Used* (current memory usage, both in B and %).
+  - **Memory Total** (total memory on the system, in B).
+  - **Memory Available** (current memory available/free, in B).
+  - **Memory Used** (current memory usage, both in B and %).
   - If swap is enabled, there will be similar sensors for swap.
   - Sourced via ProcFS. Updated ~every minute.
 - Disk:
-  - *Disk Usage* (in %) per disk/mount.
+  - **Disk Usage** (in %) per disk/mount.
     - Attributes: File system type, bytes/inode total/free/used.
     - Sourced via ProcFS. Updated ~every minute.
-  - *Total Read/Writes* (count) per disk.
+  - **Total Read/Writes** (count) per disk.
     - Attributes include total milliseconds/sectors spent.
-  - *Read/Write Rate* (in KB/s) per disk.
+  - **Read/Write Rate** (in KB/s) per disk.
     - Both sourced via SysFS. Updated ~every 5 seconds.
+  - **IO Operations in Progress** per disk.
+    - Sourced via SysFS. Updated ~every 5 seconds.
 - Networking:
-  - *Connection State* (connected/disconnected/activating/deactivating) per
+  - **Connection State** (connected/disconnected/activating/deactivating) per
     connection. Updated when state changes. Requires D-Bus and NetworkManager.
     - Attributes: IP addresses and networks.
   - Connected Wi-Fi Network Details (requires D-Bus and NetworkManager.):
-    - *SSID* (the SSID of the Wi-Fi network). Updated when SSID changes.
-    - *Frequency* (the frequency band of the Wi-Fi network, in Hz). Updated when frequency
+    - **SSID** (the SSID of the Wi-Fi network). Updated when SSID changes.
+    - **Frequency** (the frequency band of the Wi-Fi network, in Hz). Updated when frequency
       changes.
-    - *Speed* (the network speed of the Wi-Fi network, in Mbps). Updated when speed
+    - **Speed** (the network speed of the Wi-Fi network, in Mbps). Updated when speed
       changes.
-    - *Strength* (the strength of the signal of the Wi-Fi network, in dB).
+    - **Strength** (the strength of the signal of the Wi-Fi network, in dB).
       Updated when strength changes.
-    - *BSSID* (the BSSID of the Wi-Fi network). Updated when BSSID changes.
-  - *Bytes Received/Sent* (in B). Updated ~every 5s.
-    - Attributes: packet count, drops, errors. Via ProcFS.
-  - *Bytes Received/Sent Rate* (transfer rate, in B/s). Updated ~every 5
+    - **BSSID** (the BSSID of the Wi-Fi network). Updated when BSSID changes.
+  - **Device/Link State**
+    - Via netlink.
+  - **Bytes Received/Sent** (in B). Updated ~every 5s.
+    - Per network device/link and total.
+    - Via netlink.
+  - **Bytes Received/Sent Rate** (transfer rate, in B/s). Updated ~every 5
     seconds. Via ProcFS.
+    - Per network device/link and total.
+    - Via netlink.
 - CPU:
-  - *Load Average (1/5/15 min)*. Updated ~every 1 minute. Via ProcFS.
-  - *CPU Usage* (in %). Both total (all-cores) and per-core. Updated ~every 10
+  - **Load Average (1/5/15 min)**. Updated ~every 1 minute. Via ProcFS.
+  - **CPU Usage** (in %). Both total (all-cores) and per-core. Updated ~every 10
     seconds. Via ProcFS.
     - Attributes include breakdown of CPU time per state (i.e., user, idle,
       servicing interrupts, etc.).
-  - *CPU Core Frequency* (in Hz). Per-core. Updated ~every 10 seconds. Via
+  - **CPU Core Frequency** (in Hz). Per-core. Updated ~every 10 seconds. Via
     ProcFS.
     - Attributes include current driver and governor in use.
 - Power Related Details:
-  - *Power Profile* (the current power profile as set by the
+  - **Power Profile** (the current power profile as set by the
     power-profiles-daemon). Updated when profile changes.
     - Via D-Bus (requires [power-profiles-daemon](https://hadess.fedorapeople.org/power-profiles-daemon-docs/gdbus-net.hadess.PowerProfiles.html)).
-  - *Screen Lock State* (current state of screen lock). Updated when screen lock
+  - **Screen Lock State** (current state of screen lock). Updated when screen lock
     changes.
     - Via D-Bus. Requires `xscreensaver` or `systemd-logind` support.
-  - *Power State* (power state of device, e.g., suspended, powered on/off).
+  - **Power State** (power state of device, e.g., suspended, powered on/off).
     Updated when power state changes.
     - Via D-Bus. Requires `systemd-logind`.
-- Power Controls (when [configured with MQTT](#mqtt-sensors-and-controls)):
-  - *Lock/Unlock Screen/Screensaver* Locks/unlocks the session for the user
+- Power Controls (when [configured with MQTT](#-mqtt-sensors-and-controls)):
+  - **Lock/Unlock Screen/Screensaver** Locks/unlocks the session for the user
     running Go Hass Agent.
-  - *Suspend* Will (instantly) suspend (the system state is saved to RAM and
+  - **Suspend** Will (instantly) suspend (the system state is saved to RAM and
     the CPU is turned off) the device running Go Hass Agent.
-  - *Hibernate* Will (instantly) hibernate (the system state is saved to disk
+  - **Hibernate** Will (instantly) hibernate (the system state is saved to disk
     and the machine is powered down) the device running Go Hass Agent.
-  - *Power Off* Will (instantly) power off the device running Go Hass Agent.
-  - *Reboot* Will (instantly) reboot the device running Go Hass Agent.
+  - **Power Off** Will (instantly) power off the device running Go Hass Agent.
+  - **Reboot** Will (instantly) reboot the device running Go Hass Agent.
   - Power controls require a system configured with `systemd-logind` (and D-Bus)
     support.
 - Various System Details:
-  - *Boot Time* (date/Time of last system boot). Via ProcFS.
-  - *Uptime*. Updated ~every 15 minutes. Via ProcFS.
-  - *Kernel Version* (version of the currently running kernel). Updated on agent
+  - **Boot Time** (date/Time of last system boot). Via ProcFS.
+  - **Uptime*. Updated ~every 15 minutes. Via ProcFS.
+  - **Kernel Version** (version of the currently running kernel). Updated on agent
     start. Via ProcFS.
+  - Vulnerabilities:
+    - **Firmware Security** the [Host Security ID](https://fwupd.github.io/libfwupdplugin/hsi.html) of the device running Go Hass Agent.
+      - Attributes show details for each HSI attribute.
+      - Via D-Bus. Requires `fwupd` running on the system.
+    - **CPU Vulnerabilities** whether any CPU vulnerabilities have been detected by the kernel and exploitable/unmitigated.
+      - Attributes show the status of each vulnerability detected.
+      - Via ProcFS.
   - Distribution Details:
-    - *Distribution Name* (name of the running distribution, e.g., Fedora,
+    - **Distribution Name** (name of the running distribution, e.g., Fedora,
     Ubuntu).
-    - *Distribution Version* (version of the running distribution).
+    - **Distribution Version** (version of the running distribution).
     - Both updated on agent start. Via ProcFS.
-  - *Current Users* (count of users with active sessions on the system). Updated
+  - **Current Users** (count of users with active sessions on the system). Updated
     when any session changes.
     - Attributes: List of usernames | When user count changes.
     - Via D-Bus. Requires `systemd-logind`.
-  - *ABRT Problems* (count of any problems logged to the ABRT daemon). Updated
+  - **ABRT Problems** (count of any problems logged to the ABRT daemon). Updated
     ~every 15 minutes.
     - Attributes: extracted problem details.
     - Requires ABRT.
   - Hardware Sensors:
-    - Any *temp*, *fan*, *power* and other hardware sensors, including associated
-      *alarms*. Updated ~every 1 minute.
+    - Any **temp**, **fan**, **power** and other hardware sensors, including associated
+      **alarms**. Updated ~every 1 minute.
     - Extracted from the `/sys/class/hwmon` file system.
+
+#### All Operating Systems
+
+- **Go Hass Agent Version**. Updated on agent start.
+- **External IP Addresses**. All external IP addresses (IPv4/6) of the device
+  running the agent.
+- **Connection Latency**. Total connection time (in milliseconds) to connect to
+  Home Assistant from the device running Go Hass Agent. Additional times shown
+  as attributes.
 
 [⬆️ Back to Top](#-table-of-contents)
 
@@ -321,8 +344,8 @@ distribution:
 - **Ubuntu/Debian**: use the `.deb`.
 - **Arch**: use the `.tar.zst`.
 
-Packages (and binaries) are available for **amd64**, **arm (v7)** and **arm64**
-architectures.
+Packages (and binaries) are available for **amd64**, **arm (v6 and v7)** and
+**arm64** architectures.
 
 For distributions not listed above, you can try the binary, or build it
 yourself from source (see development [docs](docs/README.md)). Note that while
@@ -340,6 +363,8 @@ following for the `rpm` package can be used:
 ```shell
 cosign verify-blob --key cosign.pub --signature go-hass-agent-*.rpm.sig go-hass-agent-*.rpm
 ```
+
+[⬆️ Back to Top](#-table-of-contents)
 
 #### 🚢 Container
 
@@ -376,6 +401,8 @@ able to report sensors and receive notifications.
 When you have entered all the details, click **Submit** and the agent should
 start running and reporting sensors to the Home Assistant instance.
 
+[⬆️ Back to Top](#-table-of-contents)
+
 ### 👻 Running “Headless”
 
 Go Hass Agent will automatically detect if there is no GUI available and run in
@@ -400,6 +427,8 @@ specifying the `--terminal` command-line option.
 
 If you want to run Go Hass Agent as a service on a headless machine, see the
 [FAQ](#i-want-to-run-the-agent-on-a-server-as-a-service-without-a-gui-can-i-do-this).
+
+[⬆️ Back to Top](#-table-of-contents)
 
 ### 🐳 Running in a container
 
@@ -458,6 +487,8 @@ reported will be severely limited without them:
 - `--device /dev/video0:/dev/video0`
   - Allows webcam control (when configured with MQTT).
 
+[⬆️ Back to Top](#-table-of-contents)
+
 ### ♻️ Regular Usage
 
 When running, Go Hass Agent will appear as a device under the Mobile App
@@ -466,6 +497,8 @@ sensors/entities you can use in any automations, scripts, dashboards and other
 parts of Home Assistant.
 
 [![Open your Home Assistant instance to the mobile_app integration.](https://my.home-assistant.io/badges/integration.svg)](https://my.home-assistant.io/redirect/integration/?domain=mobile_app)
+
+[⬆️ Back to Top](#-table-of-contents)
 
 ### 📌 Configuration Location
 
@@ -479,7 +512,9 @@ The configuration is located in a file called `preferences.toml` in
 While the configuration can be edited manually, it is recommended to let the
 agent manage this file.
 
-### Script Sensors
+[⬆️ Back to Top](#-table-of-contents)
+
+### 🐚 Script Sensors
 
 Go Hass Agent supports utilising scripts to create sensors. In this way, you can
 extend the sensors presented to Home Assistant by the agent. Note that as the
@@ -667,7 +702,7 @@ running the agent. Script output is sent to your Home Assistant instance.
 
 [⬆️ Back to Top](#-table-of-contents)
 
-### MQTT Sensors and Controls
+### 🚌 MQTT Sensors and Controls
 
 > [!NOTE]
 > MQTT Sensors and Controls are not enabled by default.
@@ -896,15 +931,14 @@ disruptive actions on a device that another user is accessing.
 
 ### Build Requirements
 
-Go Hass Agent uses [Mage](https://magefile.org/) for development. Make sure you
-follow the instructions on the Mage website to install Mage.
+Go Hass Agent uses [Mage](https://magefile.org/) for development.
 
 ### Compiling
 
 Use the following mage invocation in the project root directory:
 
 ```shell
-mage -d build/magefiles -w . build:full
+go run github.com/magefile/mage -d build/magefiles -w . build:full
 ```
 
 This will:
@@ -916,6 +950,8 @@ This will:
 
 To just build a binary, replace `build:full` with `build:fast` in the mage
 invocation above.
+
+[⬆️ Back to Top](#-table-of-contents)
 
 ### Cross Compilation
 
@@ -931,7 +967,7 @@ export TARGETPLATFORM=linux/arm64 # or linux/arm/v6 or linux/arm/v7
 Install the target architecture libraries for cross-compilation:
 
 ```shell
-mage -d build/magefiles -w . preps:deps
+go run github.com/magefile/mage -d build/magefiles -w . preps:deps
 ```
 
 Then the commands for building and packaging above should work as expected.
@@ -939,6 +975,8 @@ Then the commands for building and packaging above should work as expected.
 > [!NOTE]
 > The devcontainer has all the necessary compilers and libraries
 > installed for cross-compilation.
+
+[⬆️ Back to Top](#-table-of-contents)
 
 ### Packages
 
@@ -948,7 +986,7 @@ packages for Fedora, Arch, and Ubuntu/Debian.
 To build packages, use the following invocations:
 
 ```shell
-mage -v -d build/magefiles -w . package:nfpm
+go run github.com/magefile/mage -d build/magefiles -w . package:nfpm
 ```
 
 The above mage actions will install the necessary tooling for packaging, if
@@ -957,6 +995,8 @@ needed.
 - Packages will be available under the `dist/` folder.
 - You can build packages for other architectures as well by following the guide
   for [cross-compliation](#cross-compilation).
+
+[⬆️ Back to Top](#-table-of-contents)
 
 ### Container Images
 
@@ -979,8 +1019,8 @@ podman build --file ./Dockerfile --platform linux/arm/v7 --tag go-hass-agent
 
 > [!NOTE]
 > By default, the container will run as a user with uid/gid 1000/1000.
-> You can pick a different uid/gid when building by adding --build-arg UID=999
-> and --build-arg GID=999 (adjusting the values as appropriate).
+> You can pick a different uid/gid when building by adding `--build-arg UID=999`
+> and `--build-arg GID=999` (adjusting the values as appropriate).
 
 [⬆️ Back to Top](#-table-of-contents)
 
@@ -1032,6 +1072,8 @@ precision_ if desired). This is useful for sensors whose native unit is not very
 human-friendly. For example the memory sensors report values in bytes (B),
 whereas you may wish to change the unit of measurement to gigabytes (GB).
 
+[⬆️ Back to Top](#-table-of-contents)
+
 ### _Can I disable some sensors?_
 
 - The agent itself does not currently support disabling individual sensors.
@@ -1047,11 +1089,15 @@ detect the disabled state and send/not send updates as appropriate.
 > While the agent will stop sending updates for a disabled sensor, it
 > will not stop gathering the raw data for the sensor.
 
+[⬆️ Back to Top](#-table-of-contents)
+
 ### _The GUI windows are too small/too big. How can I change the size?_
 
 - See [Scaling](https://developer.fyne.io/architecture/scaling) in the Fyne
 documentation. In the tray icon menu, select _Settings_ to open the Fyne
 settings app which can adjust the scaling for the app windows.
+
+[⬆️ Back to Top](#-table-of-contents)
 
 ### _What is the resource (CPU, memory) usage of the agent?_
 
@@ -1064,6 +1110,8 @@ settings app which can adjust the scaling for the app windows.
   usage may be affected by the “business” of the bus. For sensors that are
   polled on an interval, the agent makes use of some jitter in the polling
   intervals to avoid a “thundering herd” problem.
+
+[⬆️ Back to Top](#-table-of-contents)
 
 ### _I've updated the agent and now I've got a bunch of duplicate/removed/disabled sensors?_
 
@@ -1085,6 +1133,8 @@ settings app which can adjust the scaling for the app windows.
 
   [![Open your Home Assistant instance to the repairs
   integration.](https://my.home-assistant.io/badges/repairs.svg)](https://my.home-assistant.io/redirect/repairs)
+
+[⬆️ Back to Top](#-table-of-contents)
 
 ### _Can I reset the agent (start from new)?_
 
@@ -1111,6 +1161,8 @@ settings app which can adjust the scaling for the app windows.
    that registration was successful.
 8. Restart the agent.
 
+[⬆️ Back to Top](#-table-of-contents)
+
 ### _I want to run the agent on a server, as a service, without a GUI. Can I do this?_
 
 - Yes. The packages install a systemd service file that can be enabled and
@@ -1127,6 +1179,8 @@ go-hass-agent && systemctl --user start go-hass-agent`.
 should start with every boot.
 - For other init systems, consult their documentation on how to enable and run
 user services.
+
+[⬆️ Back to Top](#-table-of-contents)
 
 ### _Can (or does) the agent run as root or with privileges?_
 

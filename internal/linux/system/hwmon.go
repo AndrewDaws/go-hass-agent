@@ -21,79 +21,54 @@ const (
 	hwMonInterval = time.Minute
 	hwMonJitter   = 5 * time.Second
 
-	hwmonWorkerID = "hwmon_sensors"
+	hwmonWorkerID = "hwmon"
 )
 
-type hwSensor struct {
-	*hwmon.Sensor
-	icon        func() string
-	sensorType  types.SensorClass
-	deviceClass types.DeviceClass
-	stateClass  types.StateClass
-}
-
-func (s *hwSensor) Attributes() map[string]any {
+func hwmonSensorAttributes(details *hwmon.Sensor) map[string]any {
 	attributes := make(map[string]any)
 
-	attributes["sensor_type"] = s.MonitorType.String()
-	attributes["sysfs_path"] = s.Path
+	attributes["sensor_type"] = details.MonitorType.String()
+	attributes["sysfs_path"] = details.Path
 	attributes["data_source"] = linux.DataSrcSysfs
 
-	if s.Units() != "" {
-		attributes["native_unit_of_measurement"] = s.Units()
-	}
-
-	for _, a := range s.Sensor.Attributes {
-		attributes[a.Name] = a.Value
+	if details.Units() != "" {
+		attributes["native_unit_of_measurement"] = details.Units()
 	}
 
 	return attributes
 }
 
-func (s *hwSensor) State() any {
-	return s.Value()
-}
-
-func (s *hwSensor) Icon() string {
-	return s.icon()
-}
-
-func (s *hwSensor) SensorType() types.SensorClass {
-	return s.sensorType
-}
-
-func (s *hwSensor) DeviceClass() types.DeviceClass {
-	return s.deviceClass
-}
-
-func (s *hwSensor) StateClass() types.StateClass {
-	return s.stateClass
-}
-
-func (s *hwSensor) Category() string {
-	return "diagnostic"
-}
-
-func newHWSensor(details *hwmon.Sensor) *hwSensor {
-	newSensor := &hwSensor{
-		Sensor: details,
+func newHWSensor(details *hwmon.Sensor) sensor.Entity {
+	newSensor := sensor.Entity{
+		Name:     details.Name(),
+		Category: types.CategoryDiagnostic,
+		Units:    details.Units(),
+		State: &sensor.State{
+			ID:         details.ID(),
+			Value:      details.Value(),
+			Attributes: hwmonSensorAttributes(details),
+		},
 	}
 
-	switch newSensor.MonitorType {
+	switch details.MonitorType {
 	case hwmon.Alarm, hwmon.Intrusion:
-		newSensor.icon = func() string {
-			if v, ok := newSensor.Value().(bool); ok && v {
-				return "mdi:alarm-light"
-			}
-
-			return "mdi:alarm-light-off"
+		if v, ok := details.Value().(bool); ok && v {
+			newSensor.Icon = "mdi:alarm-light"
 		}
-		newSensor.sensorType = types.BinarySensor
+
+		newSensor.Icon = "mdi:alarm-light-off"
+		newSensor.EntityType = types.BinarySensor
+
+		if details.MonitorType == hwmon.Alarm {
+			newSensor.DeviceClass = types.BinarySensorDeviceClassProblem
+		} else {
+			newSensor.DeviceClass = types.BinarySensorDeviceClassTamper
+		}
 	default:
 		icon, deviceClass := parseSensorType(details.MonitorType.String())
-		newSensor.icon = func() string { return icon }
-		newSensor.deviceClass = deviceClass
-		newSensor.stateClass = types.StateClassMeasurement
+		newSensor.Icon = icon
+		newSensor.DeviceClass = deviceClass
+		newSensor.StateClass = types.StateClassMeasurement
 	}
 
 	return newSensor
@@ -101,17 +76,15 @@ func newHWSensor(details *hwmon.Sensor) *hwSensor {
 
 type hwMonWorker struct{}
 
-func (w *hwMonWorker) Interval() time.Duration { return hwMonInterval }
+func (w *hwMonWorker) UpdateDelta(_ time.Duration) {}
 
-func (w *hwMonWorker) Jitter() time.Duration { return hwMonJitter }
-
-func (w *hwMonWorker) Sensors(_ context.Context, _ time.Duration) ([]sensor.Details, error) {
+func (w *hwMonWorker) Sensors(_ context.Context) ([]sensor.Entity, error) {
 	hwmonSensors, err := hwmon.GetAllSensors()
 	if err != nil {
 		return nil, fmt.Errorf("could not retrieve hardware sensors: %w", err)
 	}
 
-	sensors := make([]sensor.Details, 0, len(hwmonSensors))
+	sensors := make([]sensor.Entity, 0, len(hwmonSensors))
 
 	for _, s := range hwmonSensors {
 		sensors = append(sensors, newHWSensor(s))
@@ -120,32 +93,31 @@ func (w *hwMonWorker) Sensors(_ context.Context, _ time.Duration) ([]sensor.Deta
 	return sensors, nil
 }
 
-func NewHWMonWorker(_ context.Context) (*linux.SensorWorker, error) {
-	return &linux.SensorWorker{
-			Value:    &hwMonWorker{},
-			WorkerID: hwmonWorkerID,
-		},
-		nil
+func NewHWMonWorker(_ context.Context) (*linux.PollingSensorWorker, error) {
+	worker := linux.NewPollingWorker(hwmonWorkerID, hwMonInterval, hwMonJitter)
+	worker.PollingType = &hwMonWorker{}
+
+	return worker, nil
 }
 
 func parseSensorType(t string) (icon string, deviceclass types.DeviceClass) {
 	switch t {
 	case "Temp":
-		return "mdi:thermometer", types.DeviceClassTemperature
+		return "mdi:thermometer", types.SensorDeviceClassTemperature
 	case "Fan":
 		return "mdi:turbine", 0
 	case "Power":
-		return "mdi:flash", types.DeviceClassPower
+		return "mdi:flash", types.SensorDeviceClassPower
 	case "Voltage":
-		return "mdi:lightning-bolt", types.DeviceClassVoltage
+		return "mdi:lightning-bolt", types.SensorDeviceClassVoltage
 	case "Energy":
-		return "mdi:lightning-bolt", types.DeviceClassEnergyStorage
+		return "mdi:lightning-bolt", types.SensorDeviceClassEnergyStorage
 	case "Current":
-		return "mdi:current-ac", types.DeviceClassCurrent
+		return "mdi:current-ac", types.SensorDeviceClassCurrent
 	case "Frequency", "PWM":
-		return "mdi:sawtooth-wave", types.DeviceClassFrequency
+		return "mdi:sawtooth-wave", types.SensorDeviceClassFrequency
 	case "Humidity":
-		return "mdi:water-percent", types.DeviceClassHumidity
+		return "mdi:water-percent", types.SensorDeviceClassHumidity
 	default:
 		return "mdi:chip", 0
 	}

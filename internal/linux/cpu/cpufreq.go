@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/joshuar/go-hass-agent/internal/hass/sensor"
 	"github.com/joshuar/go-hass-agent/internal/hass/sensor/types"
 	"github.com/joshuar/go-hass-agent/internal/linux"
 )
@@ -23,7 +24,7 @@ const (
 	driverFile   = "cpufreq/scaling_driver"
 
 	cpuFreqIcon  = "mdi:chip"
-	cpuFreqUnits = "Hz"
+	cpuFreqUnits = "kHz"
 )
 
 type cpuFreq struct {
@@ -33,49 +34,29 @@ type cpuFreq struct {
 	freq     string
 }
 
-type cpuFreqSensor struct {
-	*cpuFreq
-	linux.Sensor
-}
-
-func (s *cpuFreqSensor) Name() string {
-	num := strings.TrimPrefix(s.cpu, "cpu")
-
-	return "Core " + num + " Frequency"
-}
-
-func (s *cpuFreqSensor) ID() string {
-	num := strings.TrimPrefix(s.cpu, "cpu")
-
-	return "cpufreq_core" + num + "_frequency"
-}
-
-func (s *cpuFreqSensor) Attributes() map[string]any {
-	return map[string]any{
-		"governor":                   s.governor,
-		"driver":                     s.driver,
-		"data_source":                s.DataSource,
-		"native_unit_of_measurement": s.UnitsString,
-	}
-}
-
-func newCPUFreqSensor(id string) *cpuFreqSensor {
+func newCPUFreqSensor(id string) sensor.Entity {
 	info := getCPUFreqs(id)
+	num := strings.TrimPrefix(info.cpu, "cpu")
 
-	sensor := &cpuFreqSensor{
-		cpuFreq: info,
-		Sensor: linux.Sensor{
-			UnitsString:      cpuFreqUnits,
-			IconString:       cpuFreqIcon,
-			DataSource:       linux.DataSrcSysfs,
-			DeviceClassValue: types.DeviceClassFrequency,
-			StateClassValue:  types.StateClassMeasurement,
-			IsDiagnostic:     true,
-			Value:            info.freq,
+	return sensor.Entity{
+		Name:        "Core " + num + " Frequency",
+		Units:       cpuFreqUnits,
+		DeviceClass: types.SensorDeviceClassFrequency,
+		StateClass:  types.StateClassMeasurement,
+		Category:    types.CategoryDiagnostic,
+		State: &sensor.State{
+			ID:         "cpufreq_core" + num + "_frequency",
+			Value:      info.freq,
+			Icon:       cpuFreqIcon,
+			EntityType: types.Sensor,
+			Attributes: map[string]any{
+				"governor":                   info.governor,
+				"driver":                     info.driver,
+				"data_source":                linux.DataSrcSysfs,
+				"native_unit_of_measurement": cpuFreqUnits,
+			},
 		},
 	}
-
-	return sensor
 }
 
 func getCPUFreqs(id string) *cpuFreq {

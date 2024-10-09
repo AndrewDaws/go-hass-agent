@@ -18,6 +18,7 @@ import (
 	"github.com/iancoleman/strcase"
 
 	"github.com/joshuar/go-hass-agent/internal/hass/sensor"
+	"github.com/joshuar/go-hass-agent/internal/hass/sensor/types"
 	"github.com/joshuar/go-hass-agent/internal/linux"
 )
 
@@ -35,17 +36,15 @@ const (
 
 var ErrParseLoadAvgs = errors.New("could not parse load averages")
 
-type loadAvgsSensorWorker struct {
+type loadAvgsWorker struct {
 	path     string
-	loadAvgs []*linux.Sensor
+	loadAvgs []sensor.Entity
 }
 
-func (w *loadAvgsSensorWorker) Interval() time.Duration { return loadAvgUpdateInterval }
+func (w *loadAvgsWorker) UpdateDelta(_ time.Duration) {}
 
-func (w *loadAvgsSensorWorker) Jitter() time.Duration { return loadAvgUpdateJitter }
-
-func (w *loadAvgsSensorWorker) Sensors(_ context.Context, _ time.Duration) ([]sensor.Details, error) {
-	sensors := make([]sensor.Details, loadAvgsTotal)
+func (w *loadAvgsWorker) Sensors(_ context.Context) ([]sensor.Entity, error) {
+	sensors := make([]sensor.Entity, loadAvgsTotal)
 
 	loadAvgData, err := os.ReadFile(w.path)
 	if err != nil {
@@ -65,16 +64,21 @@ func (w *loadAvgsSensorWorker) Sensors(_ context.Context, _ time.Duration) ([]se
 	return sensors, nil
 }
 
-func newLoadAvgSensors() []*linux.Sensor {
-	sensors := make([]*linux.Sensor, loadAvgsTotal)
+func newLoadAvgSensors() []sensor.Entity {
+	sensors := make([]sensor.Entity, loadAvgsTotal)
 
 	for idx, loadType := range []string{"CPU load average (1 min)", "CPU load average (5 min)", "CPU load average (15 min)"} {
-		loadAvgSensor := &linux.Sensor{
-			IconString:  loadAvgIcon,
-			UnitsString: loadAvgUnit,
-			DataSource:  linux.DataSrcProcfs,
-			DisplayName: loadType,
-			UniqueID:    strcase.ToSnake(loadType),
+		loadAvgSensor := sensor.Entity{
+			Name:       loadType,
+			Units:      loadAvgUnit,
+			StateClass: types.StateClassMeasurement,
+			State: &sensor.State{
+				ID:   strcase.ToSnake(loadType),
+				Icon: loadAvgIcon,
+				Attributes: map[string]any{
+					"data_source": linux.DataSrcProcfs,
+				},
+			},
 		}
 
 		sensors[idx] = loadAvgSensor
@@ -99,10 +103,9 @@ func parseLoadAvgs(data []byte) ([]string, error) {
 	return loadAvgs, nil
 }
 
-func NewLoadAvgWorker(_ context.Context) (*linux.SensorWorker, error) {
-	return &linux.SensorWorker{
-			Value:    &loadAvgsSensorWorker{loadAvgs: newLoadAvgSensors(), path: filepath.Join(linux.ProcFSRoot, "loadavg")},
-			WorkerID: loadAvgsWorkerID,
-		},
-		nil
+func NewLoadAvgWorker(_ context.Context) (*linux.PollingSensorWorker, error) {
+	worker := linux.NewPollingWorker(loadAvgsWorkerID, loadAvgUpdateInterval, loadAvgUpdateJitter)
+	worker.PollingType = &loadAvgsWorker{loadAvgs: newLoadAvgSensors(), path: filepath.Join(linux.ProcFSRoot, "loadavg")}
+
+	return worker, nil
 }

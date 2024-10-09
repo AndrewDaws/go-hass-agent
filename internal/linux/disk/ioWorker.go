@@ -22,8 +22,8 @@ import (
 const (
 	ratesUpdateInterval = 5 * time.Second
 	ratesUpdateJitter   = time.Second
-
-	ratesWorkerID = "disk_rates_sensors"
+	ratesWorkerID       = "disk_rates_sensors"
+	totalsID            = "total"
 )
 
 // ioWorker creates sensors for disk IO counts and rates per device. It
@@ -31,7 +31,9 @@ const (
 type ioWorker struct {
 	boottime time.Time
 	devices  map[string][]*diskIOSensor
-	mu       sync.Mutex
+	linux.PollingSensorWorker
+	delta time.Duration
+	mu    sync.Mutex
 }
 
 // addDevice adds a new device to the tracker map. If sthe device is already
@@ -48,49 +50,36 @@ func (w *ioWorker) addDevice(dev *device) {
 
 // updateDevice will update a tracked device's stats. For rates, it will
 // recalculate based on the given time delta.
-func (w *ioWorker) updateDevice(dev *device, stats map[stat]uint64, delta time.Duration) []sensor.Details {
+func (w *ioWorker) updateDevice(id string, stats map[stat]uint64, delta time.Duration) []sensor.Entity {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	sensors := make([]sensor.Details, len(w.devices["total"]))
+	sensors := make([]sensor.Entity, len(w.devices[id]))
 
-	if _, found := w.devices[dev.id]; found && stats != nil {
-		for idx := range w.devices[dev.id] {
-			w.devices[dev.id][idx].update(stats, delta)
-			sensors[idx] = w.devices[dev.id][idx]
+	if _, found := w.devices[id]; found && stats != nil {
+		for idx := range w.devices[id] {
+			w.devices[id][idx].update(stats, delta)
+			sensors[idx] = *w.devices[id][idx].Entity
 		}
 	}
 
 	return sensors
 }
 
-func (w *ioWorker) updateTotals(stats map[stat]uint64, delta time.Duration) []sensor.Details {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-
-	sensors := make([]sensor.Details, len(w.devices["total"]))
-
-	for idx := range w.devices["total"] {
-		w.devices["total"][idx].update(stats, delta)
-		sensors[idx] = w.devices["total"][idx]
-	}
-
-	return sensors
+func (w *ioWorker) UpdateDelta(delta time.Duration) {
+	w.delta = delta
 }
 
-func (w *ioWorker) Interval() time.Duration { return ratesUpdateInterval }
-
-func (w *ioWorker) Jitter() time.Duration { return ratesUpdateJitter }
-
-func (w *ioWorker) Sensors(ctx context.Context, duration time.Duration) ([]sensor.Details, error) {
+func (w *ioWorker) Sensors(ctx context.Context) ([]sensor.Entity, error) {
 	// Get valid devices.
 	deviceNames, err := getDeviceNames()
 	if err != nil {
 		return nil, fmt.Errorf("could not fetch disk devices: %w", err)
 	}
 
-	sensors := make([]sensor.Details, 0, 4*len(deviceNames)+4) //nolint:mnd
-	totals := make(map[stat]uint64)
+	var sensors []sensor.Entity
+
+	statsTotals := make(map[stat]uint64)
 
 	// Get the current device info and stats for all valid devices.
 	for _, name := range deviceNames {
@@ -107,7 +96,7 @@ func (w *ioWorker) Sensors(ctx context.Context, duration time.Duration) ([]senso
 		w.addDevice(dev)
 
 		// Update device stats and return updated sensors.
-		sensors = append(sensors, w.updateDevice(dev, stats, duration)...)
+		sensors = append(sensors, w.updateDevice(dev.id, stats, w.delta)...)
 
 		// Don't include "aggregate" devices in totals.
 		if strings.HasPrefix(dev.id, "dm") || strings.HasPrefix(dev.id, "md") {
@@ -115,43 +104,43 @@ func (w *ioWorker) Sensors(ctx context.Context, duration time.Duration) ([]senso
 		}
 		// Add device stats to the totals.
 		for stat, value := range stats {
-			totals[stat] += value
+			statsTotals[stat] += value
 		}
 	}
 
-	// Update total stats and return updated sensors.
-	sensors = append(sensors, w.updateTotals(totals, duration)...)
+	// Update total stats.
+	sensors = append(sensors, w.updateDevice(totalsID, statsTotals, w.delta)...)
 
 	return sensors, nil
 }
 
-func NewIOWorker(ctx context.Context) (*linux.SensorWorker, error) {
+func NewIOWorker(ctx context.Context) (*linux.PollingSensorWorker, error) {
+	worker := linux.NewPollingWorker(ratesWorkerID, ratesUpdateInterval, ratesUpdateJitter)
+
 	boottime, found := linux.CtxGetBoottime(ctx)
 	if !found {
-		return nil, fmt.Errorf("%w: no boottime value", linux.ErrInvalidCtx)
-	}
-
-	worker := &ioWorker{
-		devices:  make(map[string][]*diskIOSensor),
-		boottime: boottime,
+		return worker, fmt.Errorf("%w: no boottime value", linux.ErrInvalidCtx)
 	}
 
 	// Add sensors for a pseudo "total" device which tracks total values from
 	// all devices.
-	worker.devices["total"] = newDeviceSensors(worker.boottime, &device{id: "total"})
+	devices := make(map[string][]*diskIOSensor)
+	devices["total"] = newDeviceSensors(boottime, &device{id: totalsID})
 
-	return &linux.SensorWorker{
-			Value:    worker,
-			WorkerID: ratesWorkerID,
-		},
-		nil
+	worker.PollingType = &ioWorker{
+		devices:  devices,
+		boottime: boottime,
+	}
+
+	return worker, nil
 }
 
 func newDeviceSensors(boottime time.Time, dev *device) []*diskIOSensor {
 	return []*diskIOSensor{
-		newDiskIOSensor(boottime, dev, diskReads),
-		newDiskIOSensor(boottime, dev, diskWrites),
-		newDiskIORateSensor(dev, diskReadRate),
-		newDiskIORateSensor(dev, diskWriteRate),
+		newDiskIOSensor(dev, diskReads, boottime),
+		newDiskIOSensor(dev, diskWrites, boottime),
+		newDiskIOSensor(dev, diskReadRate, boottime),
+		newDiskIOSensor(dev, diskWriteRate, boottime),
+		newDiskIOSensor(dev, diskIOInProgress, boottime),
 	}
 }
