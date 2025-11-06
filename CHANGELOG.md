@@ -1,5 +1,122 @@
 # Changelog
 
+## [14.0.0](https://github.com/AndrewDaws/go-hass-agent/compare/v13.3.3...v14.0.0) (2025-08-30)
+
+
+### ⚠ BREAKING CHANGES
+
+* **scripts:** script sensors are now run using a new scheduler backend. The scheduling is still based on cron schedule strings but some more complex/esoteric schedule strings may no longer work.
+* **components/preferences:** Sensors and (MQTT) controls preferences have been restructured in the preferences file. Users who have customised any sensor/control preferences will need to manually migrate the changes to the new structure.
+
+### Features
+
+* :sparkles: add a job scheduler ([281c03c](https://github.com/AndrewDaws/go-hass-agent/commit/281c03cd23d56e2382f5b0cf8070d17a4e5b3009))
+* **agent/sensor:** :sparkles: add preference to disable connection latency sensor ([dc31bed](https://github.com/AndrewDaws/go-hass-agent/commit/dc31bed70767e36a072f184d8b963f15a0dbbc9b))
+* **agent/sensor:** :sparkles: add preference to disable version sensor ([dabe732](https://github.com/AndrewDaws/go-hass-agent/commit/dabe732b5f4ff6a0db55b9637e44f5ee8cbfa167))
+* **app:** :recycle: migrate to modular app design ([c15b6db](https://github.com/AndrewDaws/go-hass-agent/commit/c15b6dbb8c70ec1d8bc3424ad66a4e882b568a21))
+* **components/preferences:** restructure sensor/control preferences ([5376ce1](https://github.com/AndrewDaws/go-hass-agent/commit/5376ce1eed04763a5bf3f54ae017779f403e7077))
+* **hass:** :building_construction: perform validation on data received before making requests ([96cc423](https://github.com/AndrewDaws/go-hass-agent/commit/96cc423c81a09fe1acd1d8243940ff349f57db0b))
+* **linux:** :zap: use a common struct to manage rate sensor values ([7bbbedb](https://github.com/AndrewDaws/go-hass-agent/commit/7bbbedb2ba5a3c33bbd566b05d2c68c9a907c436))
+* **linux/battery:** :sparkles: break out voltage and energy battery attributes into their own sensors ([5875192](https://github.com/AndrewDaws/go-hass-agent/commit/58751920e7a0febe929d2fd6540b1b999d1a46e1))
+* **linux/cpu:** :sparkles: add preferences to disable cpu load avgs and vulnerabilities sensors ([aa46a99](https://github.com/AndrewDaws/go-hass-agent/commit/aa46a9971f9f38d5aa7249c2c87b6deeb1efad1e))
+* **linux/desktop:** :sparkles: add preference to disable desktop sensors ([cba5a50](https://github.com/AndrewDaws/go-hass-agent/commit/cba5a5047475b61a674a68c0388ace732d87bbde))
+* **linux/disk:** :sparkles: add preferences to disable disk io/usage sensors and set intervals for sensor updates ([96be29b](https://github.com/AndrewDaws/go-hass-agent/commit/96be29b07c19fbe334146a7a30fb2ac5eca907b1))
+* **linux/disk:** :sparkles: basic SMART disk monitoring sensors ([17e2b8f](https://github.com/AndrewDaws/go-hass-agent/commit/17e2b8fca820cca7133a58dfdc71a4cb69073d5b))
+* **linux/location:** :sparkles: add preference to disable location tracking ([ef6a113](https://github.com/AndrewDaws/go-hass-agent/commit/ef6a113650f47cd87ed7df962c0bfcfdc003f257))
+* **linux/media:** :sparkles: add preferences to disable mpris, audio sensors and controls ([8eedf6d](https://github.com/AndrewDaws/go-hass-agent/commit/8eedf6daccbf132201bcab185c1186feb66351c5))
+* **linux/media:** :sparkles: add webcam and mic in use sensors ([46f2ad8](https://github.com/AndrewDaws/go-hass-agent/commit/46f2ad8825ea399eb60893800f8069612f90d7e6))
+* **linux/mem:** :sparkles: add preferences for disabling and setting update interval of mem usage sensors and disabling oom events tracking ([83e1efc](https://github.com/AndrewDaws/go-hass-agent/commit/83e1efc0e3aabebecf64ae508c8ac7f5f0c83009))
+* **linux/net:** :sparkles: add preference to set the interval for network device rates sensor updates ([97c104f](https://github.com/AndrewDaws/go-hass-agent/commit/97c104fb49794e2a85e120581915eb601f7058e8))
+* **linux/power:** :sparkles: add an MQTT powered control to set a sleep/shutdown inhibit lock ([7c63100](https://github.com/AndrewDaws/go-hass-agent/commit/7c63100e888611f45eeb7f52a533302309224f3a))
+* **linux/power:** :sparkles: add preferences for disabling the various power-based sensors individuallly ([6ca6fe1](https://github.com/AndrewDaws/go-hass-agent/commit/6ca6fe1795b97db687c34f1c3ae103578e2debb7))
+* **linux/system:** :sparkles: add preferences for disabling/setting poll intervals (where appropriate) for all system sensor and event workers ([cca049b](https://github.com/AndrewDaws/go-hass-agent/commit/cca049be2d01d49ae5ecb3e12274222ee61b5e13))
+* **models:** :sparkles: start implementing various types and objects with openapi-codegen ([ba96a3e](https://github.com/AndrewDaws/go-hass-agent/commit/ba96a3e221d0a2d33ced5d095eedb493fbc7712a))
+* **scheduler:** :sparkles: implement a poll trigger with jitter ([26b3d99](https://github.com/AndrewDaws/go-hass-agent/commit/26b3d99ebd2b9f002423fdf4cc7ae3160dc2cd21))
+* **scripts:** :boom: use scheduler for scripts ([1c4e8dd](https://github.com/AndrewDaws/go-hass-agent/commit/1c4e8dd00d49e9985c1f841fad275c553d40c5c5))
+* **service:** :sparkles: systemd service improvements ([bcae15f](https://github.com/AndrewDaws/go-hass-agent/commit/bcae15f2cd4fa76eac092d825c083bf39154cb82))
+
+
+### Bug Fixes
+
+* :bug: fix permissions ([04d201a](https://github.com/AndrewDaws/go-hass-agent/commit/04d201a1ee644070d0496c60a27e37215e9508e1))
+* :bug: improve error handling in workers ([af3c485](https://github.com/AndrewDaws/go-hass-agent/commit/af3c485cb96ea581df6a7e107410fafe15ccc297))
+* :fire: fix missed worker conversions ([6b37417](https://github.com/AndrewDaws/go-hass-agent/commit/6b3741749557f4b1b43226b33654b5e57aeb9f7e))
+* :rotating_light: fix more linter warnings ([a563eec](https://github.com/AndrewDaws/go-hass-agent/commit/a563eecf3f0cf24e22809a541b49fb3cd79bca54))
+* **commands:** :bug: commands worker doesn't need to implement a worker with preferences ([f537cf5](https://github.com/AndrewDaws/go-hass-agent/commit/f537cf5a1555372f183df6d78953a2a89a4aa82c))
+* **dbusx:** :bug: better user session finder ([dbb5e06](https://github.com/AndrewDaws/go-hass-agent/commit/dbb5e0684bcf8cdb17550da0c9fca4ef4600b081))
+* **dbusx:** :bug: improve watching multiple methods ([b6e8e4b](https://github.com/AndrewDaws/go-hass-agent/commit/b6e8e4b863779f6e5102c123d47af4bbd8135b13))
+* **device:** :bug: don't try to add mqtt workers that didn't fail and cannot be enabled ([e7c1935](https://github.com/AndrewDaws/go-hass-agent/commit/e7c1935a29d42385cc1c9af605d92dabc526061e))
+* **device:** :bug: use config rest API endpoint for connection latency sensor to eliminate log spam ([6be1fd5](https://github.com/AndrewDaws/go-hass-agent/commit/6be1fd5fe7c0dcedc67ecb0b62ae917bb15278f9))
+* **hass:** :bug: actually update local registration on sensor registration ([17e8966](https://github.com/AndrewDaws/go-hass-agent/commit/17e8966bf6be21cb1ce4e468b0c106af7a34829a))
+* **hass:** :bug: better handling of initial case where HA config has no entity status ([7156ec9](https://github.com/AndrewDaws/go-hass-agent/commit/7156ec90476f4968d8648bb849a3655d9cc0cb95))
+* **hass:** :bug: correct detection of disabled entities and quieter logging of entity state changes ([dbd8d65](https://github.com/AndrewDaws/go-hass-agent/commit/dbd8d65e278e2e9b406fecff6894c76d89ead76f))
+* **hass:** :bug: don't try to update the config initially if agent is unregistered ([a468499](https://github.com/AndrewDaws/go-hass-agent/commit/a4684999ff80515d5100afc758a77bd432828235))
+* **hass:** :bug: ensure authorization request header is set and url format is valid ([6969547](https://github.com/AndrewDaws/go-hass-agent/commit/6969547aaf9c0832c944148fb8a6a375b7523ced))
+* **hass:** :bug: ensure entity data is writeable before marshaling from event ([9c105c2](https://github.com/AndrewDaws/go-hass-agent/commit/9c105c2dff20ec06747a2bc1f77b43eb756cb1ac))
+* **hass:** :bug: ensure registration server and token are set in preferences ([7b9c2fa](https://github.com/AndrewDaws/go-hass-agent/commit/7b9c2fa68db4990efbd1d5010fe5251fcd2accda))
+* **hass:** :bug: fail fast on update job if not registered ([5c08685](https://github.com/AndrewDaws/go-hass-agent/commit/5c086851b0e9a861637d238f13651b3682672f3b))
+* **hass:** :bug: retryable is a required field on entities and requests ([9677b9c](https://github.com/AndrewDaws/go-hass-agent/commit/9677b9ca1c7b2532e09f8685fd060a5189689fc7))
+* **hass/api:** :ambulance: re-enable and fix websocket connection for notifications ([1914257](https://github.com/AndrewDaws/go-hass-agent/commit/191425772245d6636c4679acf7d56284a663b300))
+* **hass/api:** :bug: correct display of error code returned from Home Assistant Rest API ([82966ab](https://github.com/AndrewDaws/go-hass-agent/commit/82966ab62dfc7d036d662f92d8d47836591bd801))
+* **hass/api:** :bug: remove regression where websocket url retained any port element (spoiler: it shouldn't) ([4d3a4bc](https://github.com/AndrewDaws/go-hass-agent/commit/4d3a4bc580e14008cd7b916cbb38eca08c078e16))
+* **hass/discovery:** :bug: remove regression where the default server was not listed on discovery of servers during graphical registration ([c5639d0](https://github.com/AndrewDaws/go-hass-agent/commit/c5639d0ce5bd7d3c3cd69ccdfa3609455111021f))
+* **linux:** :bug: correct calculation for rate sensors ([07a3aa9](https://github.com/AndrewDaws/go-hass-agent/commit/07a3aa99b5c40f77b95942106a5d79a88c480627))
+* **linux:** :bug: don't try to run nil workers ([6c6fcec](https://github.com/AndrewDaws/go-hass-agent/commit/6c6fcec9d6bd8fdc7b8bc0e19e6d47c921421276))
+* **linux:** :bug: don't try to run nil workers ([db19d08](https://github.com/AndrewDaws/go-hass-agent/commit/db19d08dcb43cead345180ba4d8c22f19223939d))
+* **linux:** :bug: ensure polling sensors use poll interval from preferences, default otherwise ([79092be](https://github.com/AndrewDaws/go-hass-agent/commit/79092be5cb2e4ba4392da9af0f8189e1d87cb9c7))
+* **linux:** :bug: mqtt workers should create their own channels for messages ([f3e1b0e](https://github.com/AndrewDaws/go-hass-agent/commit/f3e1b0e2c9242c70ae4396ec6eed11dfcbd0a439))
+* **linux/battery:** :rotating_light: clean-up code from linter warnings ([b901c65](https://github.com/AndrewDaws/go-hass-agent/commit/b901c658e8c1c03cd6dec8e36f3cf28cebd4a5b8))
+* **linux/cpu:** :bug: actually add units for 114a35fa93c158ffe5956a94d6885e840e6a2465 ([068828b](https://github.com/AndrewDaws/go-hass-agent/commit/068828bf0879899040b2b9fec6a612f1f235526d))
+* **linux/cpu:** :bug: add units to cpu usage count sensors ([114a35f](https://github.com/AndrewDaws/go-hass-agent/commit/114a35fa93c158ffe5956a94d6885e840e6a2465))
+* **linux/cpu:** :rotating_light: clean-up code from linter warnings ([8dda011](https://github.com/AndrewDaws/go-hass-agent/commit/8dda0115aeab658c608368554845fe9c6e2a00bd))
+* **linux/desktop,linux/battery:** :fire: remove debugging output ([530e8c2](https://github.com/AndrewDaws/go-hass-agent/commit/530e8c233dff980cbf47033020c0bae289397e7f))
+* **linux/desktop:** clean-up code from linter warnings ([be848db](https://github.com/AndrewDaws/go-hass-agent/commit/be848dbdfe4018685d1dd7acd81bb58c393f1ca3))
+* **linux/disk:** :bug: don't send disk usage sensors with invalid values ([05bc753](https://github.com/AndrewDaws/go-hass-agent/commit/05bc75348236f0b973c9ee83aac1fc49a9ca1052))
+* **linux/disk:** :bug: use correct value for SATA disk attributes ([22920ac](https://github.com/AndrewDaws/go-hass-agent/commit/22920ac0545c9804103fc350377f359aabd1f886))
+* **linux/disk:** :wrench: don't generate disk sensors for podman overlay mounts by default ([3e5e8d9](https://github.com/AndrewDaws/go-hass-agent/commit/3e5e8d9a9a25b7d605d7a8d81a9f7e292a9665db))
+* **linux/location:** :bug: correct type conversion ([e0ade99](https://github.com/AndrewDaws/go-hass-agent/commit/e0ade997be11b085ce5900685f03078741a9ca63))
+* **linux/media:** :bug: fix preferences location for media sensors ([d8696b1](https://github.com/AndrewDaws/go-hass-agent/commit/d8696b159bec4e566c197c1b93c69f4c8b61be39))
+* **linux/media:** :bug: restart pipewire monitor if it crashes unexpectedly ([351e8b2](https://github.com/AndrewDaws/go-hass-agent/commit/351e8b29a379360aa9f8f8b72413d72bb0c5632b))
+* **linux/mem:** :bug: fix linter warnings in 83e1efc0e3aabebecf64ae508c8ac7f5f0c83009 ([3acd7f6](https://github.com/AndrewDaws/go-hass-agent/commit/3acd7f6b486bbfc48ad1a00d67effcaf93512791))
+* **linux/net:** :bug: correct state for networkmanager connection states ([f7f7a3b](https://github.com/AndrewDaws/go-hass-agent/commit/f7f7a3b44eedb24c50452362daa52efb1e6684c5))
+* **linux/net:** :bug: use ignored devices for network rate sensors ([18e7a67](https://github.com/AndrewDaws/go-hass-agent/commit/18e7a67419c714099e472db666db93914abc1569))
+* **linux/net:** :wrench: ignore virtual network devices created by common container engines by default ([65d7688](https://github.com/AndrewDaws/go-hass-agent/commit/65d768865f6c96bb8ea1ea7ed05c0e4adb87c399))
+* **linux/power:** :bug: don't send nil power state entity ([f8c4837](https://github.com/AndrewDaws/go-hass-agent/commit/f8c483757683e404a6ba5dc781bf4ed080a1fc8a))
+* **linux/power:** :bug: graceful shutdown of screen lock sensor worker ([b089948](https://github.com/AndrewDaws/go-hass-agent/commit/b089948960beed1db83a561944805c136f062925))
+* **linux/power:** :bug: ignore non power state signals in power state sensor code ([2f9335c](https://github.com/AndrewDaws/go-hass-agent/commit/2f9335c38d2331135c151dad43319fa30c5c2f66))
+* **linux/power:** :rotating_light: fix linter warning ([e38c259](https://github.com/AndrewDaws/go-hass-agent/commit/e38c259d265687bba1c10cb38d041a71a29a583c))
+* **linux/system:** :bug: correct logic around session added/removed events ([ded1d58](https://github.com/AndrewDaws/go-hass-agent/commit/ded1d58548e10edf6e21759061e0c9f0f4340106))
+* **linux/system:** :bug: ensure details are added when logging a D-Bus command execution ([763801c](https://github.com/AndrewDaws/go-hass-agent/commit/763801c8a49c79dc8d6503182ae32d194142915b))
+* **models:** :bug: make sure device/state class are sent as strings to Home Assistant ([5c83f9c](https://github.com/AndrewDaws/go-hass-agent/commit/5c83f9cd1d4d66e96c13564dbcb0610cf716943e))
+* **mqtt:** :bug: correctly parse numeric values from toml ([503d645](https://github.com/AndrewDaws/go-hass-agent/commit/503d645cbc1f91920836c63385d028f219cc3723))
+* **mqtt:** :bug: ensure a default server and topic are set if not passed in when configuring MQTT from the command-line ([beee456](https://github.com/AndrewDaws/go-hass-agent/commit/beee456f8bc596c1f72b4efe80ba1fa7d903c894))
+* **mqtt:** :bug: make sure devices use a unique "app" id for mqtt topics ([5b64ae9](https://github.com/AndrewDaws/go-hass-agent/commit/5b64ae9ccc07e6771af263cd3e72924b61f45322))
+* **mqtt:** :fire: remove spew ([1ec500e](https://github.com/AndrewDaws/go-hass-agent/commit/1ec500eb6ae38e5cd4acd619f263a75e8208ee12))
+* **mqtt:** :sparkles: all MQTT functionality can now be disabled in preferences ([0e72e47](https://github.com/AndrewDaws/go-hass-agent/commit/0e72e47aff011e68e785fef9bbac2f9a6c51fa8d))
+* **pkg/whichdistro:** :bug: ignore lines that are not key=value pairs ([ef90391](https://github.com/AndrewDaws/go-hass-agent/commit/ef90391faeceeaef7f52acf6cb0d6fb5b490851a))
+* **preferences:** :bug: ensure version is written to `preferences.toml` when it is saved ([7b720b4](https://github.com/AndrewDaws/go-hass-agent/commit/7b720b45c535e9309ea3ccd854a0a338065041fc))
+* **scripts:** :bug: actually warn about script parsing errors ([101b2a8](https://github.com/AndrewDaws/go-hass-agent/commit/101b2a8a7534e35976237c0dae83a5517f52cac7))
+* **scripts:** :bug: remove regression whereby script sensors were not sending their sensor states initially at agent start-up ([cbb0344](https://github.com/AndrewDaws/go-hass-agent/commit/cbb03441f2c4d690088eee013aa8395afc70e7da))
+* **scripts:** :sparkles: scripts worker can now be disabled in preferences ([7912047](https://github.com/AndrewDaws/go-hass-agent/commit/7912047280257d6aab69a64d359d6fc2c4679a9f))
+* **ui:** :bug: store/fetch mqtt preferences from context ([a20f509](https://github.com/AndrewDaws/go-hass-agent/commit/a20f509aac496eb31888d6b1c613e425af267d92))
+* **workers:** :bug: improved worker context handling ([6389dbc](https://github.com/AndrewDaws/go-hass-agent/commit/6389dbcfa8371076eb655b3a6268c0f634ce56e6))
+* **workers:** :zap: improve worker shutdown handling ([2290564](https://github.com/AndrewDaws/go-hass-agent/commit/2290564eca19b6050a475b313bea15367b2153c4))
+
+
+### Performance Improvements
+
+* :zap: remove unnecessary abstractions ([259322e](https://github.com/AndrewDaws/go-hass-agent/commit/259322ef7b1779e4097210f623e669a36f1cd225))
+* **agent:** :recycle: combine sensor and event workers ([b35bf98](https://github.com/AndrewDaws/go-hass-agent/commit/b35bf98fb3e2637625633b2997ab2a4bed512d9e))
+* **hass:** :zap: reduce number of requests per entity update ([1ab7fad](https://github.com/AndrewDaws/go-hass-agent/commit/1ab7fadbfdf3bb40476e0b0a30286daf1cf087f0))
+* **linux:** :zap: use a shared pipewire monitor instance for workers monitoring pipewire events ([972e595](https://github.com/AndrewDaws/go-hass-agent/commit/972e5957b5235723ecfe06749c6f76b0355ebf4c))
+* **linux/media:** :zap: improved pipewire monitoring for webcam/mic in use sensors ([2b65d49](https://github.com/AndrewDaws/go-hass-agent/commit/2b65d49c7b448f8defaba2a42eb0caef4f2b6b6a))
+* **workers:** :zap: better delta calculation ([6dd9cd2](https://github.com/AndrewDaws/go-hass-agent/commit/6dd9cd28c3ba4dd3eb5f4accfa421ced9a4f5d2d))
+
+
+### Reverts
+
+* **linux:** :rewind: simplify capabilities checks ([c420e63](https://github.com/AndrewDaws/go-hass-agent/commit/c420e63955a75e4567ec27776d48651f5b98b8b0))
+
 ## [13.3.3](https://github.com/joshuar/go-hass-agent/compare/v13.3.2...v13.3.3) (2025-08-16)
 
 
